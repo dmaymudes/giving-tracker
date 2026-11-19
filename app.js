@@ -369,7 +369,34 @@ function render() {
   const m = $("#main");
   if (view === "#org") m.innerHTML = viewOrg(decodeURIComponent(hash.slice(5)));
   else m.innerHTML = ({ "#decide": viewDecide, "#execute": viewExecute, "#budget": viewBudget, "#charts": viewCharts, "#history": viewHistory }[view] || viewDecide)();
+  applySorts();
 }
+/* ---------- click a column header to sort; the choice is kept per screen and table ---------- */
+S.sort = {};
+const sortKey = t => (location.hash || "#decide").split("/")[0] + ":" + [...document.querySelectorAll("#main table")].indexOf(t);
+function cellVal(td) {
+  if (!td) return "";
+  const inp = td.querySelector("input:not([type=checkbox]),select"), t = (inp ? inp.value : td.textContent).trim();
+  if (td.classList.contains("n") || /^[−+-]?\$?[\d,]+(\.\d+)?%?$/.test(t)) { const n = parseFloat(t.replace(/−/g, "-").replace(/[$,%+]/g, "")); return isNaN(n) ? 0 : n; }
+  return t.toLowerCase();
+}
+function applySorts() {
+  document.querySelectorAll("#main table").forEach(t => {
+    const st = S.sort[sortKey(t)], head = t.querySelector("tr"); if (!head || !head.querySelector("th")) return;
+    [...head.children].forEach((th, i) => { th.classList.add("sortable"); th.dataset.dir = st && st.col === i ? st.dir : ""; });
+    if (!st) return;
+    const body = head.parentNode, rows = [...body.children].filter(r => r !== head && !r.classList.contains("tot")), tot = [...body.children].filter(r => r.classList.contains("tot"));
+    rows.sort((x, y) => { const a = cellVal(x.children[st.col]), b = cellVal(y.children[st.col]); return (typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b))) * (st.dir === "asc" ? 1 : -1); });
+    rows.concat(tot).forEach(r => body.appendChild(r));
+  });
+}
+document.addEventListener("click", e => {
+  const th = e.target.closest && e.target.closest("#main th"); if (!th) return;
+  const t = th.closest("table"), k = sortKey(t), col = [...th.parentNode.children].indexOf(th), cur = S.sort[k];
+  const numeric = th.classList.contains("n");
+  S.sort[k] = { col, dir: cur && cur.col === col ? (cur.dir === "asc" ? "desc" : "asc") : numeric ? "desc" : "asc" };
+  applySorts();
+});
 const giftOf = el => { const tr = el.closest("tr[data-id]"); return tr && S.gifts.find(g => g.id === tr.dataset.id); };
 document.addEventListener("click", e => {
   const t = e.target;

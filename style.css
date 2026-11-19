@@ -69,3 +69,4 @@ svg rect:hover{opacity:.8}
 .dvt i.up{left:50%;background:#2a78d6;border-radius:0 4px 4px 0}.dvt i.dn{right:50%;background:#eb6834;border-radius:4px 0 0 4px}
 .hb.wide .hbrow{grid-template-columns:minmax(140px,300px) 1fr 72px 52px}
 footer{text-align:center;padding:16px;font-size:12px}footer a{color:var(--mute)}
+th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--ink)}th[data-dir="asc"]::after{content:" ▲";font-size:9px}th[data-dir="desc"]::after{content:" ▼";font-size:9px}
