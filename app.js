@@ -257,32 +257,78 @@ function viewCharts() {
     return `<div class="card"><h2>${title}</h2><div class="hb">` + keys.map(k => `<div class="hbrow"${tip(`${k}: ${money(m[k].v)}, ${pct(total ? m[k].v / total : 0)} of giving, ${m[k].n} gifts`)}>
       <span class="hbl">${esc(k)}</span><span class="hbt"><i style="width:${(100 * m[k].v / max).toFixed(1)}%"></i></span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + `</div></div>`;
   };
-  // giving by year, stacked by location; colour follows the location, in the Config list order
-  const locs = (S.lists["Location"] || []).filter(l => l !== "Overhead"), years = [...new Set(S.gifts.map(g => g.year))].sort();
-  const val = (y, l) => S.gifts.filter(g => g.year === y && g.loc === l && (g.decision === "Approved" || (y === S.year && g.decision === "Proposed"))).reduce((s, g) => s + pipeline(g), 0);
-  const tot = years.map(y => locs.reduce((s, l) => s + val(y, l), 0)), top = Math.max(1, ...tot), step = top > 400000 ? 100000 : top > 150000 ? 50000 : 25000, ymax = Math.ceil(top / step) * step;
-  const W = 760, H = 300, L = 56, B = 26, T = 18, pw = W - L - 10, ph = H - B - T, bw = Math.min(64, pw / years.length * 0.6);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Giving by year and location">`;
-  for (let v = 0; v <= ymax; v += step) { const y = T + ph - ph * v / ymax; svg += `<line x1="${L}" x2="${W - 10}" y1="${y}" y2="${y}" stroke="#e6e9ef"/><text x="${L - 6}" y="${y + 4}" text-anchor="end" class="ax">${v ? "$" + v / 1000 + "K" : "0"}</text>`; }
-  years.forEach((y, i) => {
-    const cx = L + pw * (i + 0.5) / years.length; let base = 0;
-    locs.forEach((l, j) => { const v = val(y, l); if (!v) return; const h = ph * v / ymax, y0 = T + ph - ph * base / ymax - h;
-      svg += `<rect x="${cx - bw / 2}" y="${y0 + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${SERIES[j % SERIES.length]}"${tip(`${y} ${l}: ${money(v)}, ${pct(v / tot[i])} of the year`)}/>`; base += v; });
-    svg += `<text x="${cx}" y="${T + ph - ph * tot[i] / ymax - 5}" text-anchor="middle" class="ax b">${money(tot[i])}</text><text x="${cx}" y="${H - 8}" text-anchor="middle" class="ax">${y}${y === S.year && y >= new Date().getFullYear() ? " plan" : ""}</text>`;
-  });
-  svg += `</svg>`;
-  const legend = `<div class="legend">${locs.map((l, j) => `<span><i style="background:${SERIES[j % SERIES.length]}"></i>${esc(l)}</span>`).join("")}</div>`;
+  const years = [...new Set(S.gifts.map(g => g.year))].sort();
+  const counts = g => g.loc !== "Overhead" && (g.decision === "Approved" || (g.year >= new Date().getFullYear() && g.decision === "Proposed"));
+  // stacked columns by year; colour follows the entity (its position in keys), never its rank
+  const stacked = (keys, field, label) => {
+    const val = (y, k) => S.gifts.filter(g => g.year === y && counts(g) && (k === "Other" && !keys.includes(g[field]) || g[field] === k)).reduce((s, g) => s + pipeline(g), 0);
+    const tot = years.map(y => keys.reduce((s, k) => s + val(y, k), 0)), top = Math.max(1, ...tot), step = top > 400000 ? 100000 : top > 150000 ? 50000 : 25000, ymax = Math.ceil(top / step) * step;
+    const W = 760, H = 300, L = 56, B = 26, T = 18, pw = W - L - 10, ph = H - B - T, bw = Math.min(64, pw / years.length * 0.6);
+    const col = (k, j) => (k === "Other" ? "#98a2b3" : SERIES[j % SERIES.length]);
+    let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">`;
+    for (let v = 0; v <= ymax; v += step) { const y = T + ph - ph * v / ymax; svg += `<line x1="${L}" x2="${W - 10}" y1="${y}" y2="${y}" stroke="#e6e9ef"/><text x="${L - 6}" y="${y + 4}" text-anchor="end" class="ax">${v ? "$" + v / 1000 + "K" : "0"}</text>`; }
+    years.forEach((y, i) => {
+      const cx = L + pw * (i + 0.5) / years.length; let base = 0;
+      keys.forEach((k, j) => { const v = val(y, k); if (!v) return; const h = ph * v / ymax, y0 = T + ph - ph * base / ymax - h;
+        svg += `<rect x="${cx - bw / 2}" y="${y0 + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${col(k, j)}"${tip(`${y} ${k}: ${money(v)}, ${pct(v / tot[i])} of the year`)}/>`; base += v; });
+      svg += `<text x="${cx}" y="${T + ph - ph * tot[i] / ymax - 5}" text-anchor="middle" class="ax b">${money(tot[i])}</text><text x="${cx}" y="${H - 8}" text-anchor="middle" class="ax">${y}${y >= new Date().getFullYear() ? " plan" : ""}</text>`;
+    });
+    return `<div class="legend">${keys.map((k, j) => `<span><i style="background:${col(k, j)}"></i>${esc(k)}</span>`).join("")}</div>${svg}</svg>`;
+  };
+  const locs = (S.lists["Location"] || []).filter(l => l !== "Overhead");
+  const catTot = {}; S.gifts.filter(g => g.loc !== "Overhead" && g.decision === "Approved").forEach(g => (catTot[g.cat] = (catTot[g.cat] || 0) + g.amount));
+  const topCats = Object.keys(catTot).sort((a, b) => catTot[b] - catTot[a]).slice(0, 7);
+  const cats = (S.lists["Category"] || []).filter(c => topCats.includes(c)).concat(Object.keys(catTot).length > 7 ? ["Other"] : []);
+  // change against last year, per organization
+  const cur = {}, prev = {};
+  live.forEach(g => (cur[g.org] = (cur[g.org] || 0) + pipeline(g)));
+  S.gifts.filter(g => g.year === S.year - 1 && g.decision === "Approved" && g.loc !== "Overhead").forEach(g => (prev[g.org] = (prev[g.org] || 0) + g.amount));
+  const ch = [...new Set(Object.keys(cur).concat(Object.keys(prev)))].map(o => ({ o, c: cur[o] || 0, p: prev[o] || 0, d: (cur[o] || 0) - (prev[o] || 0) })).filter(x => x.c || x.p);
+  const kind = x => (!x.p ? "New" : !x.c ? "Dropped" : x.d > 0 ? "Increased" : x.d < 0 ? "Decreased" : "Unchanged");
+  const kc = {}; ch.forEach(x => { const k = kind(x); (kc[k] = kc[k] || { n: 0, d: 0 }); kc[k].n++; kc[k].d += x.d; });
+  const moved = ch.filter(x => x.d).sort((a, b) => b.d - a.d), dmax = Math.max(1, ...moved.map(x => Math.abs(x.d)));
+  const changes = `<div class="tiles">${["New", "Increased", "Unchanged", "Decreased", "Dropped"].map(k => `<div class="tile"><b>${(kc[k] || { n: 0 }).n}</b><span>${k}</span><small>${kc[k] && kc[k].d ? (kc[k].d > 0 ? "+" : "−") + money(Math.abs(kc[k].d)) : "&nbsp;"}</small></div>`).join("")}</div>` +
+    (moved.length ? `<div class="hb dv">${moved.map(x => `<div class="dvrow"${tip(`${x.o}: ${money(x.p)} in ${S.year - 1}, ${money(x.c)} in ${S.year} (${kind(x).toLowerCase()})`)}><span class="hbl">${orgLink(x.o)}</span>
+      <span class="dvt"><i class="${x.d > 0 ? "up" : "dn"}" style="width:${(50 * Math.abs(x.d) / dmax).toFixed(1)}%"></i></span><span class="hbv">${x.d > 0 ? "+" : "−"}${money(Math.abs(x.d))}</span><span class="hbp">${kind(x)}</span></div>`).join("")}</div>` : `<div class="empty">No organization's amount differs from ${S.year - 1}.</div>`);
+  // cumulative sent by month, this year against last year and the target
+  const cum = y => { const m = Array(12).fill(0); S.gifts.filter(g => g.year === y && g.decision === "Approved" && g.loc !== "Overhead" && isSent(g) && /^\d{4}-\d{2}/.test(g.date)).forEach(g => (m[+g.date.slice(5, 7) - 1] += g.amount)); let t = 0; return m.map(v => (t += v)); };
+  const cy = cum(S.year), py = cum(S.year - 1), target = S.targets["Total giving, excluding overhead ($)"] || 0, apprTot = live.filter(g => g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
+  const nowM = S.year < new Date().getFullYear() ? 11 : S.year > new Date().getFullYear() ? -1 : new Date().getMonth();
+  const progress = (() => {
+    const W = 760, H = 280, L = 56, R = 120, B = 26, T = 14, pw = W - L - R, ph = H - B - T, top = Math.max(1, target, apprTot, cy[11], py[11]), step = top > 400000 ? 100000 : top > 150000 ? 50000 : 25000, ymax = Math.ceil(top / step) * step;
+    const X = i => L + pw * i / 11, Y = v => T + ph - ph * v / ymax;
+    let g = `<div class="legend"><span><i style="background:#2a78d6"></i>${S.year}</span><span><i style="background:#98a2b3"></i>${S.year - 1}</span></div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Cumulative giving sent by month">`;
+    for (let v = 0; v <= ymax; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#e6e9ef"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end" class="ax">${v ? "$" + v / 1000 + "K" : "0"}</text>`;
+    MN.forEach((m, i) => (g += `<text x="${X(i)}" y="${H - 8}" text-anchor="middle" class="ax">${m}</text>`));
+    const ref = (v, label, dash) => (v ? `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="#667085" stroke-width="1.5" stroke-dasharray="${dash}"/><text x="${W - R + 6}" y="${Y(v) + 4}" class="ax b">${label} ${money(v)}</text>` : "");
+    g += ref(target, "Target", "6 4");
+    if (apprTot) g += ref(apprTot, "Approved", "2 3").replace(`y="${Y(apprTot) + 4}" class="ax b"`, `y="${Y(apprTot) + 4 + (target && Math.abs(Y(apprTot) - Y(target)) < 14 ? (apprTot > target ? -14 : 14) : 0)}" class="ax b"`);
+    const line = (arr, n, color, name, yr) => { if (n < 0) return ""; const pts = arr.slice(0, n + 1);
+      return `<polyline fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" points="${pts.map((v, i) => X(i) + "," + Y(v)).join(" ")}"/>` +
+        pts.map((v, i) => `<circle cx="${X(i)}" cy="${Y(v)}" r="9" fill="transparent"${tip(`${MN[i]} ${yr}: ${money(v)} sent so far`)}/><circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${color}" stroke="#fff" stroke-width="1.5" pointer-events="none"/>`).join("") +
+        ""; };
+    return g + line(py, 11, "#98a2b3", String(S.year - 1), S.year - 1) + line(cy, nowM, "#2a78d6", String(S.year), S.year) + `</svg>`;
+  })();
+  // largest recipients over all years in the sheet
+  const allTot = {}; S.gifts.filter(g => g.decision === "Approved" && g.loc !== "Overhead").forEach(g => (allTot[g.org] = (allTot[g.org] || 0) + g.amount));
+  const grand = Object.values(allTot).reduce((s, v) => s + v, 0), top15 = Object.keys(allTot).sort((a, b) => allTot[b] - allTot[a]).slice(0, 15), tmax = Math.max(1, ...top15.map(o => allTot[o]));
+  const largest = `<div class="hb wide">${top15.map(o => `<div class="hbrow"${tip(`${o}: ${money(allTot[o])} over ${years[0]} to ${years[years.length - 1]}, ${pct(allTot[o] / grand)} of all giving`)}><span class="hbl">${orgLink(o)}</span><span class="hbt"><i style="width:${(100 * allTot[o] / tmax).toFixed(1)}%"></i></span><span class="hbv">${money(allTot[o])}</span><span class="hbp">${pct(allTot[o] / grand)}</span></div>`).join("")}</div>`;
   // when the money goes out, for the selected year
   const sentM = Array(12).fill(0), cntM = Array(12).fill(0);
   yearGifts().filter(g => g.decision === "Approved" && g.loc !== "Overhead" && /^\d{4}-\d{2}/.test(g.date)).forEach(g => { const m = +g.date.slice(5, 7) - 1; sentM[m] += g.amount; cntM[m]++; });
-  const mmax = Math.max(1, ...sentM), MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const mmax = Math.max(1, ...sentM);
   const months = `<div class="cols">${sentM.map((v, i) => `<div class="col"${tip(`${MN[i]} ${S.year}: ${money(v)} in ${cntM[i]} gifts`)}><b>${v ? "$" + Math.round(v / 1000) + "K" : ""}</b><i style="height:${(100 * v / mmax).toFixed(1)}%"></i><span>${MN[i]}</span></div>`).join("")}</div>`;
   return `<div class="bar"><span>${S.year}: <b>${money(total)}</b> approved or proposed across ${live.length} gifts, excluding overhead.</span></div>
     <div class="grid2">${breakdown("By category", "cat")}${breakdown("By location", "loc")}${breakdown("By vehicle", "vehicle")}${breakdown("By who directs", "who")}</div>
-    <div class="card"><h2>Giving by year and location <small>approved gifts; the current year also counts proposals</small></h2>${legend}${svg}</div>
-    <div class="card"><h2>When gifts were sent in ${S.year} <small>by date sent</small></h2>${months}</div>`;
+    <div class="card"><h2>Changes against ${S.year - 1} <small>by organization, approved + proposed</small></h2>${changes}</div>
+    <div class="card"><h2>Progress through ${S.year} <small>cumulative dollars sent, by date sent</small></h2>${progress}</div>
+    <div class="card"><h2>Giving by year and location <small>approved gifts; years marked "plan" also count proposals</small></h2>${stacked(locs, "loc", "Giving by year and location")}</div>
+    <div class="card"><h2>Giving by year and category <small>the seven largest categories, with the rest as Other</small></h2>${stacked(cats, "cat", "Giving by year and category")}</div>
+    <div class="card"><h2>When gifts were sent in ${S.year} <small>by date sent</small></h2>${months}</div>
+    <div class="card"><h2>Largest recipients, ${years[0]} to ${years[years.length - 1]} <small>approved gifts, share of all giving</small></h2>${largest}</div>`;
 }
-const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6"];
+const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function viewOrg(name) {
   const o = S.orgs[name] || {}, rows = S.gifts.filter(g => g.org === name).sort((a, b) => b.year - a.year || b.date.localeCompare(a.date));
   let h = `<div class="bar"><button onclick="history.back()">Back</button></div><div class="card"><h2>${esc(name)} <small>${esc([o["Location"], o["Category"], o["Directed by"] && "directed by " + o["Directed by"], o["Org type"]].filter(Boolean).join(" · "))}</small></h2>
@@ -337,6 +383,7 @@ window.addEventListener("load", () => { if (DEMO || restoreToken()) start(); });
 
 /* ---------- demo data (?demo) : invented organizations, nothing is saved ---------- */
 function demoTables() {
+  if (window.GT_DEMO_TABLES) return window.GT_DEMO_TABLES; // test hook
   const orgs = [["Org ID", "Organization", "Location", "Category", "Directed by", "Org type", "EIN", "Usual vehicle", "Country", "Address line 1", "Address line 2", "City", "State", "ZIP"],
     ["O001", "Example Food Bank", "Seattle", "Basic Needs", "D&E", "501c3", "", "Foundation", "USA", "1 Main St", "", "Seattle", "WA", "98101"],
     ["O002", "Sample Land Trust", "Cape Cod", "Conservation/Climate", "All", "501c3", "", "Foundation"], ["O003", "Demo Library Friends", "Cape Cod", "Community Building", "Sue", "501c3", "", "Fidelity"],
