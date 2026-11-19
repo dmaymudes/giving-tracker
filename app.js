@@ -140,17 +140,19 @@ async function saveGifts(changes) { // [{gift, fields:{key:value}}]
   changes.forEach(ch => Object.assign(ch.gift, Object.fromEntries(Object.entries(ch.fields).map(([k, v]) => [k, v === null ? (["proposed", "amount"].includes(k) ? 0 : "") : v]))));
 }
 async function act(fn) { try { say("Saving…"); await fn(); say(""); render(); } catch (e) { say(e.message, true); } }
-async function addGift(org, amount, vehicle) {
+async function addGift(org, amount, vehicle, paid) { // paid = {method, ref, date} records a payment already made
   const maxId = S.gifts.reduce((m, g) => Math.max(m, parseInt(g.id.replace(/\D/g, ""), 10) || 0), 0);
   const id = "G" + String(maxId + 1).padStart(4, "0");
   const g = { id, year: S.year, org, loc: (S.orgs[org] || {})["Location"] || "", cat: (S.orgs[org] || {})["Category"] || "", who: (S.orgs[org] || {})["Directed by"] || "",
-    proposed: amount, decision: "Proposed", amount: 0, vehicle, pay: "", method: "", ref: "", date: "", notes: "" };
+    proposed: paid ? 0 : amount, decision: paid ? "Approved" : "Proposed", amount: paid ? amount : 0, vehicle, pay: paid ? "Confirmed" : "", method: paid ? paid.method : "", ref: paid ? paid.ref : "", date: paid ? paid.date : "", notes: "" };
   if (!DEMO) {
     const col = (await api("/values/" + encodeURIComponent("Gifts!C1:C") + "?valueRenderOption=UNFORMATTED_VALUE")).values || [];
     let row = col.length + 1;
     for (let i = 1; i < col.length; i++) if (!col[i][0]) { row = i + 1; break; }
     const c = h => colLetter(S.gcol[h]);
-    const data = [["Gift ID", id], ["Year", S.year], ["Organization", org], ["Proposed ($)", amount], ["Decision", "Proposed"], ["Vehicle", vehicle]]
+    const cells = paid ? [["Gift ID", id], ["Year", S.year], ["Organization", org], ["Decision", "Approved"], ["Amount ($)", amount], ["Vehicle", vehicle], ["Payment status", "Confirmed"], ["Method", paid.method], ["Reference", paid.ref], ["Date sent", paid.date]]
+      : [["Gift ID", id], ["Year", S.year], ["Organization", org], ["Proposed ($)", amount], ["Decision", "Proposed"], ["Vehicle", vehicle]];
+    const data = cells
       .map(([h, v]) => ({ range: "Gifts!" + c(h) + row, values: [[v]] }));
     await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "USER_ENTERED", data }) });
     g.row = row;
@@ -219,6 +221,11 @@ function viewExecute() {
     });
     h += `</table></div>`;
   });
+  h += `<div class="card"><h2>Record a payment already made <small>for ${S.year}; overhead or any gift paid outside the decide-then-send flow</small></h2><div class="bar" style="padding:12px;margin:0">
+    <input id="payorg" list="payorglist" placeholder="Payee" size="30"><datalist id="payorglist">${S.orgList.map(o => `<option value="${esc(o)}">`).join("")}</datalist>
+    <input id="payamt" class="amt" placeholder="Amount" inputmode="decimal"><select id="payveh">${vehOpts("Foundation")}</select>
+    <select id="paymeth"><option value="">Method</option>${(S.lists["Method"] || []).map(m => `<option>${esc(m)}</option>`).join("")}</select>
+    <input id="payref" class="ref" placeholder="Reference"><input id="paydate" type="date" value="${today()}"><button id="addpay" class="primary">Record payment</button></div></div>`;
   if (sent.length) {
     h += `<div class="card"><h2>Sent, not yet confirmed <small>${sent.length} gifts, ${money(sent.reduce((s, g) => s + g.amount, 0))}</small></h2><table><tr><th>Organization</th><th class="n">Amount</th><th>Vehicle</th><th>Method</th><th>Reference</th><th>Date sent</th><th></th></tr>`;
     sent.sort((a, b) => a.date.localeCompare(b.date)).forEach(g => (h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}</td><td class="n">${money(g.amount)}</td><td>${esc(g.vehicle)}</td><td>${esc(g.method)}</td><td>${esc(g.ref)}</td><td>${esc(g.date)}</td>
@@ -413,6 +420,13 @@ document.addEventListener("click", e => {
     const org = $("#neworg").value.trim(), amt = num($("#newamt").value), veh = $("#newveh").value;
     if (!S.orgs[org]) return say("Pick an organization from the list. Add new ones on the Organizations tab of the sheet first, then press Reload.", true);
     return act(() => addGift(org, amt, veh));
+  }
+  if (t.id === "addpay") {
+    const org = $("#payorg").value.trim(), amt = num($("#payamt").value), date = $("#paydate").value;
+    if (!S.orgs[org]) return say("Pick a payee from the list. Add new ones on the Organizations tab of the sheet first, then press Reload.", true);
+    if (!(amt > 0) || !date) return say("Enter an amount and a date.", true);
+    if (+date.slice(0, 4) !== S.year && !confirm("That date is not in " + S.year + ". Record it under " + S.year + " anyway?")) return;
+    return act(() => addGift(org, amt, $("#payveh").value, { method: $("#paymeth").value, ref: $("#payref").value.trim(), date }));
   }
   const a = t.dataset.a, g = a && giftOf(t); if (!g) return;
   const tr = t.closest("tr"), x = k => { const el = $(`[data-x="${k}"]`, tr); return el ? el.value : ""; };
