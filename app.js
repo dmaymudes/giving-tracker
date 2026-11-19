@@ -221,10 +221,10 @@ function viewBudget() {
     h += `<tr class="tot"><td>Total</td><td class="n">${money(T.prop)}</td><td class="n">${money(T.appr)}</td><td class="n">${money(T.sent)}</td><td class="n">${money(total)}</td><td class="n">${T.n}</td><td></td>${withTargets ? `<td>${tTotal ? `${money(tTotal)} target, ${money(Math.abs(tTotal - total))} ${total > tTotal ? "over" : "under"}` : ""}</td>` : ""}</tr></table></div>`;
     return h;
   };
-  const live = giving.filter(g => g.decision === "Approved" || g.decision === "Proposed");
+  const live = giving.filter(g => (g.decision === "Approved" || g.decision === "Proposed") && pipeline(g) > 0);
   const tierOf = a => CFG.tiers.find(x => a >= x);
   let pyr = `<div class="card"><h2>Giving pyramid <small>approved + proposed, ${S.year} against ${S.year - 1}</small></h2><table><tr><th>Gift size</th><th class="n">Gifts</th><th class="n">Total</th><th></th><th class="n">${S.year - 1} gifts</th><th class="n">${S.year - 1} total</th></tr>`;
-  const prev = S.gifts.filter(g => g.year === S.year - 1 && g.decision === "Approved" && g.loc !== "Overhead");
+  const prev = S.gifts.filter(g => g.year === S.year - 1 && g.decision === "Approved" && g.loc !== "Overhead" && g.amount > 0);
   const maxTier = Math.max(1, ...CFG.tiers.map(x => live.filter(g => tierOf(pipeline(g)) === x).reduce((s, g) => s + pipeline(g), 0)));
   CFG.tiers.forEach((x, i) => {
     const a = live.filter(g => tierOf(pipeline(g)) === x), p = prev.filter(g => tierOf(g.amount) === x), sum = a.reduce((s, g) => s + pipeline(g), 0);
