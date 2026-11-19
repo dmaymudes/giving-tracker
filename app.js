@@ -247,6 +247,42 @@ function viewHistory() {
   h += `<tr class="tot"><td>Total</td><td></td>${years.map(y => `<td class="n">${money(names.reduce((s, n) => s + (by[n][y] || 0), 0))}</td>`).join("")}<td class="n">${money(names.reduce((s, n) => s + by[n].tot, 0))}</td></tr></table></div>`;
   return h;
 }
+function viewCharts() {
+  const live = yearGifts().filter(g => g.loc !== "Overhead" && (g.decision === "Approved" || g.decision === "Proposed"));
+  const total = live.reduce((s, g) => s + pipeline(g), 0);
+  const tip = t => ` data-tip="${esc(t)}"`;
+  const breakdown = (title, field) => {
+    const m = {}; live.forEach(g => { const k = g[field] || "(none)"; (m[k] = m[k] || { v: 0, n: 0 }); m[k].v += pipeline(g); m[k].n++; });
+    const keys = Object.keys(m).filter(k => m[k].v > 0).sort((a, b) => m[b].v - m[a].v), max = Math.max(1, ...keys.map(k => m[k].v));
+    return `<div class="card"><h2>${title}</h2><div class="hb">` + keys.map(k => `<div class="hbrow"${tip(`${k}: ${money(m[k].v)}, ${pct(total ? m[k].v / total : 0)} of giving, ${m[k].n} gifts`)}>
+      <span class="hbl">${esc(k)}</span><span class="hbt"><i style="width:${(100 * m[k].v / max).toFixed(1)}%"></i></span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + `</div></div>`;
+  };
+  // giving by year, stacked by location; colour follows the location, in the Config list order
+  const locs = (S.lists["Location"] || []).filter(l => l !== "Overhead"), years = [...new Set(S.gifts.map(g => g.year))].sort();
+  const val = (y, l) => S.gifts.filter(g => g.year === y && g.loc === l && (g.decision === "Approved" || (y === S.year && g.decision === "Proposed"))).reduce((s, g) => s + pipeline(g), 0);
+  const tot = years.map(y => locs.reduce((s, l) => s + val(y, l), 0)), top = Math.max(1, ...tot), step = top > 400000 ? 100000 : top > 150000 ? 50000 : 25000, ymax = Math.ceil(top / step) * step;
+  const W = 760, H = 300, L = 56, B = 26, T = 18, pw = W - L - 10, ph = H - B - T, bw = Math.min(64, pw / years.length * 0.6);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Giving by year and location">`;
+  for (let v = 0; v <= ymax; v += step) { const y = T + ph - ph * v / ymax; svg += `<line x1="${L}" x2="${W - 10}" y1="${y}" y2="${y}" stroke="#e6e9ef"/><text x="${L - 6}" y="${y + 4}" text-anchor="end" class="ax">${v ? "$" + v / 1000 + "K" : "0"}</text>`; }
+  years.forEach((y, i) => {
+    const cx = L + pw * (i + 0.5) / years.length; let base = 0;
+    locs.forEach((l, j) => { const v = val(y, l); if (!v) return; const h = ph * v / ymax, y0 = T + ph - ph * base / ymax - h;
+      svg += `<rect x="${cx - bw / 2}" y="${y0 + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${SERIES[j % SERIES.length]}"${tip(`${y} ${l}: ${money(v)}, ${pct(v / tot[i])} of the year`)}/>`; base += v; });
+    svg += `<text x="${cx}" y="${T + ph - ph * tot[i] / ymax - 5}" text-anchor="middle" class="ax b">${money(tot[i])}</text><text x="${cx}" y="${H - 8}" text-anchor="middle" class="ax">${y}${y === S.year && y >= new Date().getFullYear() ? " plan" : ""}</text>`;
+  });
+  svg += `</svg>`;
+  const legend = `<div class="legend">${locs.map((l, j) => `<span><i style="background:${SERIES[j % SERIES.length]}"></i>${esc(l)}</span>`).join("")}</div>`;
+  // when the money goes out, for the selected year
+  const sentM = Array(12).fill(0), cntM = Array(12).fill(0);
+  yearGifts().filter(g => g.decision === "Approved" && g.loc !== "Overhead" && /^\d{4}-\d{2}/.test(g.date)).forEach(g => { const m = +g.date.slice(5, 7) - 1; sentM[m] += g.amount; cntM[m]++; });
+  const mmax = Math.max(1, ...sentM), MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = `<div class="cols">${sentM.map((v, i) => `<div class="col"${tip(`${MN[i]} ${S.year}: ${money(v)} in ${cntM[i]} gifts`)}><b>${v ? "$" + Math.round(v / 1000) + "K" : ""}</b><i style="height:${(100 * v / mmax).toFixed(1)}%"></i><span>${MN[i]}</span></div>`).join("")}</div>`;
+  return `<div class="bar"><span>${S.year}: <b>${money(total)}</b> approved or proposed across ${live.length} gifts, excluding overhead.</span></div>
+    <div class="grid2">${breakdown("By category", "cat")}${breakdown("By location", "loc")}${breakdown("By vehicle", "vehicle")}${breakdown("By who directs", "who")}</div>
+    <div class="card"><h2>Giving by year and location <small>approved gifts; the current year also counts proposals</small></h2>${legend}${svg}</div>
+    <div class="card"><h2>When gifts were sent in ${S.year} <small>by date sent</small></h2>${months}</div>`;
+}
+const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
 function viewOrg(name) {
   const o = S.orgs[name] || {}, rows = S.gifts.filter(g => g.org === name).sort((a, b) => b.year - a.year || b.date.localeCompare(a.date));
   let h = `<div class="bar"><button onclick="history.back()">Back</button></div><div class="card"><h2>${esc(name)} <small>${esc([o["Location"], o["Category"], o["Directed by"] && "directed by " + o["Directed by"], o["Org type"]].filter(Boolean).join(" · "))}</small></h2>
@@ -262,7 +298,7 @@ function render() {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.getAttribute("href") === view));
   const m = $("#main");
   if (view === "#org") m.innerHTML = viewOrg(decodeURIComponent(hash.slice(5)));
-  else m.innerHTML = ({ "#decide": viewDecide, "#execute": viewExecute, "#budget": viewBudget, "#history": viewHistory }[view] || viewDecide)();
+  else m.innerHTML = ({ "#decide": viewDecide, "#execute": viewExecute, "#budget": viewBudget, "#charts": viewCharts, "#history": viewHistory }[view] || viewDecide)();
 }
 const giftOf = el => { const tr = el.closest("tr[data-id]"); return tr && S.gifts.find(g => g.id === tr.dataset.id); };
 document.addEventListener("click", e => {
@@ -317,3 +353,12 @@ function demoTables() {
     ["Overhead", "Cape Cod Foundation", "", "Sue", "", "Deferred", "", "Online grant", "", "Seattle, maximum number of gifts", 35], ["", "", "", "All", "", "", "", "", "", "Seattle, maximum gifts of $2,500 or less", 15]];
   return [gifts, orgs, cfg];
 }
+
+/* ---------- hover tooltip for charts ---------- */
+const tipEl = document.createElement("div"); tipEl.id = "tip"; tipEl.hidden = true; document.body.appendChild(tipEl);
+document.addEventListener("mousemove", e => {
+  const t = e.target.closest && e.target.closest("[data-tip]");
+  if (!t) return (tipEl.hidden = true);
+  tipEl.textContent = t.dataset.tip; tipEl.hidden = false;
+  tipEl.style.left = Math.min(e.clientX + 12, innerWidth - tipEl.offsetWidth - 8) + "px"; tipEl.style.top = e.clientY + 14 + "px";
+});
