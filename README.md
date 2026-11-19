@@ -11,7 +11,9 @@ A static page that reads and writes a private Google Sheet. The repository holds
 
 ## Files
 
-- `config.js`: OAuth client ID and spreadsheet ID (public identifiers).
+- `config.js`: OAuth client ID, browser API key, project number and spreadsheet ID (public identifiers; the key is restricted to this site).
+
+The page asks only for Google's per-file permission (`drive.file`). On first use each person selects the giving sheet once in Google's picker, which opens showing only that file.
 - `app.js`: all logic. Rows are matched by Gift ID, so sorting the sheet by hand is safe.
 - `index.html`, `style.css`: the page.
 

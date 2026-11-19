@@ -40,7 +40,7 @@ function restoreToken() {
 async function api(path, opts) {
   const r = await fetch(API + path, Object.assign({}, opts, { headers: { Authorization: "Bearer " + S.token, "Content-Type": "application/json" } }));
   if (r.status === 401) { S.token = null; try { sessionStorage.removeItem("gt_tok"); } catch (e) {} throw new Error("Your sign-in expired. Reload the page and sign in again."); }
-  if (r.status === 403) throw new Error("This Google account can't do that on the sheet. View-only access can read but not change it.");
+  if (r.status === 403 || r.status === 404) { const e = new Error("This Google account can't do that on the sheet. View-only access can read but not change it."); e.status = r.status; throw e; }
   if (!r.ok) throw new Error("Sheets request failed (" + r.status + "): " + (await r.text()).slice(0, 200));
   return r.json();
 }
@@ -83,13 +83,37 @@ function readTargets() {
   if (ti >= 0) { const yi = ch.findIndex((h, i) => i > ti && String(h) === String(S.year)); const col = yi >= 0 ? yi : ti + 1;
     c.slice(1).forEach(r => { if (r[ti] && typeof r[col] === "number") S.targets[r[ti]] = r[col]; }); }
 }
+/* With the drive.file scope the page has no access to the sheet until the user grants it once through
+   Google's picker. The picker is opened already showing only the giving sheet. */
+function pickSheet() {
+  return new Promise((resolve, reject) => {
+    if (!window.gapi) return reject(new Error("Google's file picker has not loaded yet. Try again in a moment."));
+    gapi.load("picker", () => {
+      const view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setFileIds(CFG.spreadsheetId).setMode(google.picker.DocsViewMode.LIST);
+      new google.picker.PickerBuilder().addView(view).setOAuthToken(S.token).setDeveloperKey(CFG.apiKey).setAppId(CFG.appId)
+        .setTitle("Select the Family Giving Tracker sheet to give this page access")
+        .setCallback(d => {
+          if (d.action === google.picker.Action.PICKED) return d.docs.some(x => x.id === CFG.spreadsheetId) ? resolve() : reject(new Error("That was a different file. Choose the Family Giving Tracker sheet."));
+          if (d.action === google.picker.Action.CANCEL) reject(new Error("No sheet was selected. If the list was empty, this Google account has not been given access to the giving sheet; ask David to share it with you."));
+        }).build().setVisible(true);
+    });
+  });
+}
 async function load() {
   say("Loading…");
-  try { S.tables = await fetchTables(); ingest(S.tables); say(""); } catch (e) { say(e.message, true); throw e; }
+  try {
+    try { S.tables = await fetchTables(); }
+    catch (e) { if (DEMO || !e.status) throw e; say("Choose the giving sheet in the Google window to continue."); await pickSheet(); say("Loading…"); S.tables = await fetchTables(); }
+    ingest(S.tables); say("");
+  } catch (e) {
+    say(e.status ? "This Google account can't open the giving sheet. Ask David to share it with you." : e.message, true);
+    if (!S.gifts.length) $("#main").innerHTML = `<div id="signin"><p>The giving sheet isn't open yet.</p><button id="retry" class="primary">Try again</button></div>`;
+    throw e;
+  }
 }
 async function start() {
-  $("#signin").hidden = true;
-  await load();
+  if ($("#signin")) $("#signin").hidden = true;
+  try { await load(); } catch (e) { return; }
   const years = [...new Set(S.gifts.map(g => g.year))].sort((a, b) => b - a);
   if (!years.includes(S.year)) S.year = years[0];
   $("#year").innerHTML = years.map(y => `<option${y === S.year ? " selected" : ""}>${y}</option>`).join("");
@@ -350,6 +374,7 @@ const giftOf = el => { const tr = el.closest("tr[data-id]"); return tr && S.gift
 document.addEventListener("click", e => {
   const t = e.target;
   if (t.id === "signinbtn") return signIn();
+  if (t.id === "retry") return S.token ? start() : signIn();
   if (t.id === "reload") return load().then(render).catch(() => {});
   if (t.dataset.org) return (location.hash = "#org/" + encodeURIComponent(t.dataset.org));
   if (t.id === "approveall") {
