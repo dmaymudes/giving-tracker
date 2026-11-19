@@ -254,18 +254,20 @@ function viewBudget() {
   };
   const live = giving.filter(g => (g.decision === "Approved" || g.decision === "Proposed") && pipeline(g) > 0);
   const tierOf = a => CFG.tiers.find(x => a >= x);
-  let pyr = `<div class="card"><h2>Giving pyramid <small>approved + proposed, ${S.year} against ${S.year - 1}</small></h2><table><tr><th>Gift size</th><th class="n">Gifts</th><th class="n">Total</th><th></th><th class="n">${S.year - 1} gifts</th><th class="n">${S.year - 1} total</th></tr>`;
-  const prev = S.gifts.filter(g => g.year === S.year - 1 && g.decision === "Approved" && g.loc !== "Overhead" && g.amount > 0);
-  const maxTier = Math.max(1, ...CFG.tiers.map(x => live.filter(g => tierOf(pipeline(g)) === x).reduce((s, g) => s + pipeline(g), 0)));
+  // the pyramid counts one line per organization: all of its gifts in the year added together
+  const byOrg = (rows, amt) => { const m = {}; rows.forEach(g => { (m[g.org] = m[g.org] || { v: 0, loc: g.loc }).v += amt(g); }); return Object.values(m).filter(o => o.v > 0); };
+  const cur = byOrg(live, pipeline), prev = byOrg(S.gifts.filter(g => g.year === S.year - 1 && g.decision === "Approved" && g.loc !== "Overhead"), g => g.amount);
+  let pyr = `<div class="card"><h2>Giving pyramid <small>organizations by their total for the year (all gifts combined); approved + proposed, ${S.year} against ${S.year - 1}</small></h2><table><tr><th>Total to the organization</th><th class="n">Organizations</th><th class="n">Total</th><th></th><th class="n">${S.year - 1} organizations</th><th class="n">${S.year - 1} total</th></tr>`;
+  const maxTier = Math.max(1, ...CFG.tiers.map(x => cur.filter(o => tierOf(o.v) === x).reduce((s, o) => s + o.v, 0)));
   CFG.tiers.forEach((x, i) => {
-    const a = live.filter(g => tierOf(pipeline(g)) === x), p = prev.filter(g => tierOf(g.amount) === x), sum = a.reduce((s, g) => s + pipeline(g), 0);
+    const a = cur.filter(o => tierOf(o.v) === x), p = prev.filter(o => tierOf(o.v) === x), sum = a.reduce((s, o) => s + o.v, 0);
     const label = i === 0 ? money(x) + " and up" : x === 0 ? "Under " + money(CFG.tiers[i - 1]) : money(x) + " to " + money(CFG.tiers[i - 1] - 1);
-    pyr += `<tr><td>${label}</td><td class="n">${a.length}</td><td class="n">${money(sum)}</td><td><div class="meter"><i style="width:${(100 * sum / maxTier).toFixed(0)}%"></i></div></td><td class="n">${p.length}</td><td class="n">${money(p.reduce((s, g) => s + g.amount, 0))}</td></tr>`;
+    pyr += `<tr><td>${label}</td><td class="n">${a.length}</td><td class="n">${money(sum)}</td><td><div class="meter"><i style="width:${(100 * sum / maxTier).toFixed(0)}%"></i></div></td><td class="n">${p.length}</td><td class="n">${money(p.reduce((s, o) => s + o.v, 0))}</td></tr>`;
   });
-  pyr += `</table></div>`;
-  const smallSea = live.filter(g => g.loc === "Seattle" && pipeline(g) <= 2500).length;
+  pyr += `<tr class="tot"><td>Total</td><td class="n">${cur.length}</td><td class="n">${money(cur.reduce((s, o) => s + o.v, 0))}</td><td></td><td class="n">${prev.length}</td><td class="n">${money(prev.reduce((s, o) => s + o.v, 0))}</td></tr></table></div>`;
+  const smallSea = cur.filter(o => o.loc === "Seattle" && o.v <= 2500).length;
   const oh = gs.filter(g => g.loc === "Overhead" && g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
-  const note = `<div class="bar"><span>Seattle gifts of $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
+  const note = `<div class="bar"><span>Seattle organizations receiving $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
   return note + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle") + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
