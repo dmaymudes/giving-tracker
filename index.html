@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Family Giving Tracker</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+<header>
+  <h1>Family Giving Tracker</h1>
+  <nav id="nav" hidden>
+    <a href="#decide">Decide</a><a href="#execute">Execute</a><a href="#budget">Budget</a><a href="#history">History</a>
+  </nav>
+  <div id="controls" hidden>
+    <label>Year <select id="year"></select></label>
+    <button id="reload" title="Reload from the sheet">Reload</button>
+    <a id="sheetlink" target="_blank" rel="noopener">Open sheet</a>
+  </div>
+</header>
+<div id="msg" role="status"></div>
+<main id="main">
+  <div id="signin">
+    <p>Sign in with a Google account that has access to the giving sheet.</p>
+    <button id="signinbtn" class="primary">Sign in with Google</button>
+  </div>
+</main>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
