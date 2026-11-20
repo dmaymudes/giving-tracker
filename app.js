@@ -54,7 +54,7 @@ async function fetchTables() {
 }
 function ingest(tables) {
   const [g, o, c] = tables;
-  const oh = o[0] || []; S.orgs = {}; S.orgList = [];
+  const oh = o[0] || []; S.orgs = {}; S.orgList = []; S.ocol = {}; oh.forEach((h, i) => (S.ocol[h] = i));
   o.slice(1).forEach(r => {
     const x = {}; oh.forEach((h, i) => (x[h] = r[i] == null ? "" : r[i]));
     if (x["Organization"]) { S.orgs[x["Organization"]] = x; S.orgList.push(x["Organization"]); }
@@ -142,6 +142,16 @@ async function saveGifts(changes) { // [{gift, fields:{key:value}}]
   }
   changes.forEach(ch => Object.assign(ch.gift, Object.fromEntries(Object.entries(ch.fields).map(([k, v]) => [k, v === null ? (["proposed", "amount"].includes(k) ? 0 : "") : v]))));
 }
+async function saveOrgNote(name, text) {
+  if (!DEMO) {
+    if (S.ocol["Notes"] == null) throw new Error("The Organizations tab has no Notes column.");
+    const names = (await api("/values/" + encodeURIComponent("Organizations!" + colLetter(S.ocol["Organization"]) + "1:" + colLetter(S.ocol["Organization"])) + "?valueRenderOption=UNFORMATTED_VALUE")).values.map(r => String(r[0] || ""));
+    const idx = names.indexOf(name);
+    if (idx < 1) throw new Error(name + " was not found on the Organizations tab. Reload and try again.");
+    await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: [{ range: "Organizations!" + colLetter(S.ocol["Notes"]) + (idx + 1), values: [[text]] }] }) });
+  }
+  if (S.orgs[name]) S.orgs[name]["Notes"] = text;
+}
 async function act(fn) { try { say("Saving…"); await fn(); say(""); render(); } catch (e) { say(e.message, true); } }
 async function addGift(org, amount, vehicle, paid) { // paid = {method, ref, date} records a payment already made
   const maxId = S.gifts.reduce((m, g) => Math.max(m, parseInt(g.id.replace(/\D/g, ""), 10) || 0), 0);
@@ -176,6 +186,7 @@ function filterBar(extra) {
 }
 const vehOpts = cur => (S.lists["Vehicle"] || []).map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
 const orgLink = n => `<a class="orglink" data-org="${esc(n)}">${esc(n)}</a>`;
+const orgNote = n => ((S.orgs[n] || {})["Notes"] ? `<div class="onote" title="Note about the organization; edit it on the organization's page">${esc(S.orgs[n]["Notes"])}</div>` : "");
 
 /* ---------- views ---------- */
 function viewDecide() {
@@ -188,14 +199,15 @@ function viewDecide() {
   h += `<div class="card"><h2>Decisions to make <small>${open.length} undecided, ${money(sum(open))} · approved so far ${money(sum(all.filter(g => g.decision === "Approved")))}</small></h2>`;
   if (!rows.length) h += `<div class="empty">Nothing to decide with these filters.</div>`;
   else {
-    h += `<table><tr><th>Organization</th><th>Location</th><th>Directed by</th><th class="n">${S.year - 1} total</th><th class="n">Proposed</th><th>Vehicle</th><th>Decision</th><th></th></tr>`;
+    h += `<table><tr><th>Organization</th><th>Location</th><th>Directed by</th><th class="n">${S.year - 1} total</th><th class="n">Proposed</th><th>Vehicle</th><th>Decision</th><th></th><th>Note on this gift</th></tr>`;
     rows.forEach(g => {
       const done = g.decision !== "Proposed";
-      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}</td><td>${esc(g.loc)}</td><td>${esc(g.who)}</td><td class="n">${money(lastYearTotal(g.org))}</td>
+      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${orgNote(g.org)}</td><td>${esc(g.loc)}</td><td>${esc(g.who)}</td><td class="n">${money(lastYearTotal(g.org))}</td>
         <td class="n">${done ? money(g.decision === "Approved" ? g.amount : g.proposed) : `<input class="amt" data-a="proposed" value="${g.proposed || ""}" inputmode="decimal">`}</td>
         <td>${done ? esc(g.vehicle) : `<select data-a="vehicle">${vehOpts(g.vehicle)}</select>`}</td>
         <td><span class="tag ${esc(g.decision)}">${esc(g.decision)}</span></td>
-        <td>${done ? `<button data-a="reopen">Reopen</button>` : `<button data-a="approve" class="ok">Approve</button> <button data-a="defer">Defer</button> <button data-a="decline" class="bad">Decline</button>`}</td></tr>`;
+        <td>${done ? `<button data-a="reopen">Reopen</button>` : `<button data-a="approve" class="ok">Approve</button> <button data-a="defer">Defer</button> <button data-a="decline" class="bad">Decline</button>`}</td>
+        <td><input class="note" data-a="notes" value="${esc(g.notes)}" placeholder="Add a note"></td></tr>`;
     });
     h += `</table>`;
   }
@@ -217,7 +229,7 @@ function viewExecute() {
       <table><tr><th>Organization</th><th class="n">Amount</th><th>Address</th><th>Method</th><th>Reference</th><th>Date sent</th><th></th></tr>`;
     rows.forEach(g => {
       const o = S.orgs[g.org] || {}, addr = [o["Address line 1"], o["Address line 2"], [o["City"], o["State"], o["ZIP"]].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}</td><td class="n">${money(g.amount)}</td><td class="addr">${esc(addr)}${o["EIN"] ? " · EIN " + esc(o["EIN"]) : ""}</td>
+      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${g.notes ? `<div class="onote">${esc(g.notes)}</div>` : ""}</td><td class="n">${money(g.amount)}</td><td class="addr">${esc(addr)}${o["EIN"] ? " · EIN " + esc(o["EIN"]) : ""}</td>
         <td><select data-x="method"><option></option>${(S.lists["Method"] || []).map(m => `<option${m === g.method ? " selected" : ""}>${esc(m)}</option>`).join("")}</select></td>
         <td><input class="ref" data-x="ref" value="${esc(g.ref)}" placeholder="check no."></td><td><input type="date" data-x="date" value="${esc(g.date || today())}"></td>
         <td><button data-a="sent" class="ok">Mark sent</button></td></tr>`;
@@ -373,6 +385,7 @@ const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct"
 function viewOrg(name) {
   const o = S.orgs[name] || {}, rows = S.gifts.filter(g => g.org === name).sort((a, b) => b.year - a.year || b.date.localeCompare(a.date));
   let h = `<div class="bar"><button onclick="history.back()">Back</button></div><div class="card"><h2>${esc(name)} <small>${esc([o["Location"], o["Category"], o["Directed by"] && "directed by " + o["Directed by"], o["Org type"]].filter(Boolean).join(" · "))}</small></h2>
+    <div class="bar" style="padding:10px 12px;margin:0"><label style="flex:1;display:flex;gap:8px;align-items:center">Note about this organization <input id="orgnote" class="note" style="flex:1;max-width:none" data-orgname="${esc(name)}" value="${esc(o["Notes"] || "")}" placeholder="Anything worth remembering from year to year"></label></div>
     <table><tr><th>Year</th><th>Decision</th><th class="n">Proposed</th><th class="n">Amount</th><th>Vehicle</th><th>Payment</th><th>Method</th><th>Reference</th><th>Date sent</th><th>Notes</th></tr>`;
   rows.forEach(g => (h += `<tr><td>${g.year}</td><td><span class="tag ${esc(g.decision)}">${esc(g.decision)}</span></td><td class="n">${money(g.proposed)}</td><td class="n">${money(g.amount)}</td><td>${esc(g.vehicle)}</td><td>${esc(g.pay)}</td><td>${esc(g.method)}</td><td>${esc(g.ref)}</td><td>${esc(g.date)}</td><td>${esc(g.notes)}</td></tr>`));
   return h + `<tr class="tot"><td>Total given</td><td></td><td></td><td class="n">${money(rows.filter(g => g.decision === "Approved").reduce((s, g) => s + g.amount, 0))}</td><td colspan="6"></td></tr></table></div>`;
@@ -450,9 +463,11 @@ document.addEventListener("change", e => {
   if (t.id === "year") { S.year = +t.value; readTargets(); return render(); }
   if (t.id === "showall") { S.showAll = t.checked; return render(); }
   if (t.dataset.f) { S.filters[t.dataset.f] = t.value; return render(); }
+  if (t.id === "orgnote") return act(() => saveOrgNote(t.dataset.orgname, t.value.trim()));
   const g = t.dataset.a && giftOf(t); if (!g) return;
   if (t.dataset.a === "proposed") act(() => saveGifts([{ gift: g, fields: { proposed: num(t.value) } }]));
   if (t.dataset.a === "vehicle") act(() => saveGifts([{ gift: g, fields: { vehicle: t.value } }]));
+  if (t.dataset.a === "notes") act(() => saveGifts([{ gift: g, fields: { notes: t.value.trim() } }]));
 });
 window.addEventListener("hashchange", render);
 window.addEventListener("load", () => { if (DEMO || restoreToken()) start(); });
