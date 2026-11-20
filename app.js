@@ -251,7 +251,7 @@ function viewBudget() {
       let tg = "";
       if (withTargets && k === "Seattle" && tSea != null) tg = `<span class="${share > tSea ? "over" : "fine"}">at most ${pct(tSea)}</span>${tSeaN != null ? ` · <span class="${a.n > tSeaN ? "over" : "fine"}">at most ${tSeaN} gifts</span>` : ""}`;
       if (withTargets && k === "Cape Cod" && tCape != null) tg = `<span class="${share < tCape ? "under" : "fine"}">at least ${pct(tCape)}</span>`;
-      h += `<tr><td>${esc(k || "(none)")}</td><td class="n">${money(a.prop)}</td><td class="n">${money(a.appr)}</td><td class="n">${money(a.sent)}</td><td class="n">${money(tot)}</td><td class="n">${a.n}</td><td class="n">${pct(share)}</td>${hb ? (bud[k] != null ? `<td class="n">${money(bud[k])}</td><td class="n ${bud[k] - tot < 0 ? "over" : "fine"}">${bud[k] - tot < 0 ? "−" : ""}${money(Math.abs(bud[k] - tot))}${bud[k] - tot < 0 ? " over" : ""}</td>` : "<td></td><td></td>") : ""}${withTargets ? `<td>${tg}</td>` : ""}</tr>`;
+      h += `<tr><td>${esc(k || "(none)")}</td><td class="n">${money(a.prop)}</td><td class="n">${money(a.appr)}</td><td class="n">${money(a.sent)}</td><td class="n">${money(tot)}</td><td class="n">${a.n}</td><td class="n">${pct(share)}</td>${hb ? (bud[k] != null ? `<td class="n">${money(bud[k])}</td><td class="n ${bud[k] - tot < -0.5 ? "over" : bud[k] - tot > 0.5 ? "under" : "fine"}">${bud[k] - tot < -0.5 ? money(tot - bud[k]) + " over" : bud[k] - tot > 0.5 ? money(bud[k] - tot) + " unallocated" : "fully allocated"}</td>` : "<td></td><td></td>") : ""}${withTargets ? `<td>${tg}</td>` : ""}</tr>`;
     });
     h += `<tr class="tot"><td>Total</td><td class="n">${money(T.prop)}</td><td class="n">${money(T.appr)}</td><td class="n">${money(T.sent)}</td><td class="n">${money(total)}</td><td class="n">${T.n}</td><td></td>${hb ? "<td></td><td></td>" : ""}${withTargets ? `<td>${tTotal ? `${money(tTotal)} target, ${money(Math.abs(tTotal - total))} ${total > tTotal ? "over" : "under"}` : ""}</td>` : ""}</tr></table></div>`;
     return h;
@@ -272,7 +272,11 @@ function viewBudget() {
   const smallSea = cur.filter(o => o.loc === "Seattle" && o.v <= 2500).length;
   const oh = gs.filter(g => g.loc === "Overhead" && g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
   const note = `<div class="bar"><span>Seattle organizations receiving $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
-  return note + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
+  // call out any vehicle budget that is not fully used, or is exceeded
+  const vb = Object.keys(S.vbudget || {}).map(k => { const a = agg(giving.filter(g => g.vehicle === k)), tot = a.prop + a.appr, left = S.vbudget[k] - tot;
+    return `<div class="callout ${left < -0.5 ? "bad" : left > 0.5 ? "warn" : "good"}"><b>${esc(k)}:</b> ${money(S.vbudget[k])} available for ${S.year}, ${money(tot)} approved or proposed. ` +
+      (left < -0.5 ? `<b>${money(-left)} over the budget.</b>` : left > 0.5 ? `<b>${money(left)} is not yet allocated.</b>` : `Fully allocated.`) + `</div>`; }).join("");
+  return note + vb + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
   const years = [...new Set(S.gifts.map(g => g.year))].sort(), f = S.filters, by = {};
