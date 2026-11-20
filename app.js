@@ -74,7 +74,7 @@ function ingest(tables) {
   S.nextRow = g.length + 1;
   for (let i = 1; i < g.length; i++) if (!(g[i][S.gcol["Organization"]])) { S.nextRow = i + 1; break; }
   const ch = c[0] || []; S.lists = {}; S.targets = {};
-  const tcol = ch.indexOf("Soft target");
+  const tcol = ch.findIndex(h => h === "Soft target" || h === "Vehicle budget");
   ch.forEach((h, i) => { if (h && (tcol < 0 || i < tcol)) S.lists[h] = c.slice(1).map(r => r[i]).filter(x => x !== "" && x != null); });
   readTargets();
 }
@@ -82,6 +82,9 @@ function readTargets() {
   const c = S.tables[2], ch = c[0] || [], ti = ch.indexOf("Soft target"); S.targets = {};
   if (ti >= 0) { const yi = ch.findIndex((h, i) => i > ti && String(h) === String(S.year)); const col = yi >= 0 ? yi : ti + 1;
     c.slice(1).forEach(r => { if (r[ti] && typeof r[col] === "number") S.targets[r[ti]] = r[col]; }); }
+  // optional per-vehicle budgets for the year: a "Vehicle budget" column with a column per year beside it
+  const vi = ch.indexOf("Vehicle budget"); S.vbudget = {};
+  if (vi >= 0) { const yi = ch.findIndex((h, i) => i > vi && String(h) === String(S.year)); if (yi >= 0) c.slice(1).forEach(r => { if (r[vi] && typeof r[yi] === "number") S.vbudget[r[vi]] = r[yi]; }); }
 }
 /* With the drive.file scope the page has no access to the sheet until the user grants it once through
    Google's picker. The picker is opened already showing only the giving sheet. */
@@ -240,16 +243,17 @@ function viewBudget() {
     sent: rows.filter(g => g.decision === "Approved" && isSent(g)).reduce((s, g) => s + g.amount, 0), n: rows.filter(g => g.decision === "Approved" || g.decision === "Proposed").length });
   const T = agg(giving), total = T.prop + T.appr, t = S.targets;
   const tTotal = t["Total giving, excluding overhead ($)"], tSea = t["Seattle, maximum share of total"], tCape = t["Cape Cod, minimum share of total"], tSeaN = t["Seattle, maximum number of gifts"], tSmall = t["Seattle, maximum gifts of $2,500 or less"];
-  const table = (title, keys, field, withTargets) => {
-    let h = `<div class="card"><h2>${title}</h2><table><tr><th></th><th class="n">Still proposed</th><th class="n">Approved</th><th class="n">Sent</th><th class="n">Approved + proposed</th><th class="n">Gifts</th><th class="n">Share</th>${withTargets ? "<th>Soft target</th>" : ""}</tr>`;
+  const table = (title, keys, field, withTargets, bud) => {
+    const hb = bud && Object.keys(bud).length;
+    let h = `<div class="card"><h2>${title}</h2><table><tr><th></th><th class="n">Still proposed</th><th class="n">Approved</th><th class="n">Sent</th><th class="n">Approved + proposed</th><th class="n">Gifts</th><th class="n">Share</th>${hb ? `<th class="n">Available</th><th class="n">Left to allocate</th>` : ""}${withTargets ? "<th>Soft target</th>" : ""}</tr>`;
     keys.forEach(k => {
       const a = agg(giving.filter(g => g[field] === k)), tot = a.prop + a.appr, share = total ? tot / total : 0; if (!tot && !a.n) return;
       let tg = "";
       if (withTargets && k === "Seattle" && tSea != null) tg = `<span class="${share > tSea ? "over" : "fine"}">at most ${pct(tSea)}</span>${tSeaN != null ? ` · <span class="${a.n > tSeaN ? "over" : "fine"}">at most ${tSeaN} gifts</span>` : ""}`;
       if (withTargets && k === "Cape Cod" && tCape != null) tg = `<span class="${share < tCape ? "under" : "fine"}">at least ${pct(tCape)}</span>`;
-      h += `<tr><td>${esc(k || "(none)")}</td><td class="n">${money(a.prop)}</td><td class="n">${money(a.appr)}</td><td class="n">${money(a.sent)}</td><td class="n">${money(tot)}</td><td class="n">${a.n}</td><td class="n">${pct(share)}</td>${withTargets ? `<td>${tg}</td>` : ""}</tr>`;
+      h += `<tr><td>${esc(k || "(none)")}</td><td class="n">${money(a.prop)}</td><td class="n">${money(a.appr)}</td><td class="n">${money(a.sent)}</td><td class="n">${money(tot)}</td><td class="n">${a.n}</td><td class="n">${pct(share)}</td>${hb ? (bud[k] != null ? `<td class="n">${money(bud[k])}</td><td class="n ${bud[k] - tot < 0 ? "over" : "fine"}">${bud[k] - tot < 0 ? "−" : ""}${money(Math.abs(bud[k] - tot))}${bud[k] - tot < 0 ? " over" : ""}</td>` : "<td></td><td></td>") : ""}${withTargets ? `<td>${tg}</td>` : ""}</tr>`;
     });
-    h += `<tr class="tot"><td>Total</td><td class="n">${money(T.prop)}</td><td class="n">${money(T.appr)}</td><td class="n">${money(T.sent)}</td><td class="n">${money(total)}</td><td class="n">${T.n}</td><td></td>${withTargets ? `<td>${tTotal ? `${money(tTotal)} target, ${money(Math.abs(tTotal - total))} ${total > tTotal ? "over" : "under"}` : ""}</td>` : ""}</tr></table></div>`;
+    h += `<tr class="tot"><td>Total</td><td class="n">${money(T.prop)}</td><td class="n">${money(T.appr)}</td><td class="n">${money(T.sent)}</td><td class="n">${money(total)}</td><td class="n">${T.n}</td><td></td>${hb ? "<td></td><td></td>" : ""}${withTargets ? `<td>${tTotal ? `${money(tTotal)} target, ${money(Math.abs(tTotal - total))} ${total > tTotal ? "over" : "under"}` : ""}</td>` : ""}</tr></table></div>`;
     return h;
   };
   const live = giving.filter(g => (g.decision === "Approved" || g.decision === "Proposed") && pipeline(g) > 0);
@@ -268,7 +272,7 @@ function viewBudget() {
   const smallSea = cur.filter(o => o.loc === "Seattle" && o.v <= 2500).length;
   const oh = gs.filter(g => g.loc === "Overhead" && g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
   const note = `<div class="bar"><span>Seattle organizations receiving $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
-  return note + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle") + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
+  return note + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
   const years = [...new Set(S.gifts.map(g => g.year))].sort(), f = S.filters, by = {};
@@ -461,8 +465,8 @@ function demoTables() {
   orgs.slice(1).forEach((o, i) => { const amt = [10000, 15000, 2500, 5000, 1000][i];
     gifts.push(["G" + String(n++).padStart(4, "0"), y - 1, o[1], "", "", "", "", "", "Approved", amt, o[7], "Confirmed", "Check", "10" + i, (y - 1) + "-12-10", ""]);
     gifts.push(["G" + String(n++).padStart(4, "0"), y, o[1], "", "", "", "", amt, i === 0 ? "Approved" : "Proposed", i === 0 ? amt : "", o[7], i === 0 ? "To send" : "", "", "", "", ""]); });
-  const cfg = [["Location", "Vehicle", "Category", "Directed by", "Org type", "Decision", "Payment status", "Method", "", "Soft target", String(y)],
-    ["Seattle", "Foundation", "Basic Needs", "David", "501c3", "Proposed", "To send", "Check", "", "Total giving, excluding overhead ($)", 40000],
+  const cfg = [["Location", "Vehicle", "Category", "Directed by", "Org type", "Decision", "Payment status", "Method", "", "Soft target", String(y), "", "", "Vehicle budget", String(y)],
+    ["Seattle", "Foundation", "Basic Needs", "David", "501c3", "Proposed", "To send", "Check", "", "Total giving, excluding overhead ($)", 40000, "", "", "Fidelity", 3000],
     ["Cape Cod", "DAF", "Democracy", "Emily", "501c4", "Approved", "Sent", "eCheck", "", "Seattle, maximum share of total", 0.4],
     ["National", "Fidelity", "", "D&E", "", "Declined", "Confirmed", "Card", "", "Cape Cod, minimum share of total", 0.4],
     ["Overhead", "Cape Cod Foundation", "", "Sue", "", "Deferred", "", "Online grant", "", "Seattle, maximum number of gifts", 35], ["", "", "", "All", "", "", "", "", "", "Seattle, maximum gifts of $2,500 or less", 15]];
