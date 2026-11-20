@@ -308,8 +308,12 @@ function viewCharts() {
     const m = {}; live.forEach(g => { const k = g[field] || "(none)"; (m[k] = m[k] || { v: 0, n: 0 }); m[k].v += pipeline(g); m[k].n++; });
     const keys = Object.keys(m).filter(k => m[k].v > 0).sort((a, b) => m[b].v - m[a].v), max = Math.max(1, ...keys.map(k => m[k].v));
     return `<div class="card"><h2>${title}</h2><div class="hb">` + keys.map(k => `<div class="hbrow"${tip(`${k}: ${money(m[k].v)}, ${pct(total ? m[k].v / total : 0)} of giving, ${m[k].n} gifts`)}>
-      <span class="hbl">${esc(k)}</span><span class="hbt"><i style="width:${(100 * m[k].v / max).toFixed(1)}%"></i></span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + `</div></div>`;
+      <span class="hbl">${esc(k)}</span><span class="hbt"><i style="width:${(100 * m[k].v / max).toFixed(1)}%"></i></span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + (field === "cat" ? overheadRow(max) : "") + `</div></div>`;
   };
+  // overhead is not giving, so it sits below the categories in grey, measured against giving
+  const ohRows = yearGifts().filter(g => g.loc === "Overhead" && (g.decision === "Approved" || g.decision === "Proposed")), oh = ohRows.reduce((s, g) => s + pipeline(g), 0);
+  const overheadRow = max => (oh > 0 ? `<div class="hbrow oh"${tip(`Overhead: ${money(oh)} in ${ohRows.length} payments, equal to ${pct(total ? oh / total : 0)} of giving. Not counted in the giving total.`)}>
+      <span class="hbl">Overhead (not giving)</span><span class="hbt"><i style="width:${Math.min(100, 100 * oh / max).toFixed(1)}%"></i></span><span class="hbv">${money(oh)}</span><span class="hbp">${pct(total ? oh / total : 0)}</span></div>` : "");
   const years = [...new Set(S.gifts.map(g => g.year))].sort();
   const counts = g => g.loc !== "Overhead" && (g.decision === "Approved" || (g.year >= new Date().getFullYear() && g.decision === "Proposed"));
   // stacked columns by year; colour follows the entity (its position in keys), never its rank
