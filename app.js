@@ -311,24 +311,26 @@ function viewHistory() {
 function viewCharts() {
   // the same filters as Decide and Execute apply to every chart on this screen
   const G = S.gifts.filter(passes), YG = G.filter(g => g.year === S.year), filtered = Object.values(S.filters).some(Boolean);
-  const live = YG.filter(g => g.loc !== "Overhead" && (g.decision === "Approved" || g.decision === "Proposed"));
-  const total = live.reduce((s, g) => s + pipeline(g), 0);
+  const incP = S.chartProposed !== false; // proposals are drawn in a lighter shade of the same colour, or left out entirely
+  const live = YG.filter(g => g.loc !== "Overhead" && (g.decision === "Approved" || (incP && g.decision === "Proposed")));
+  const total = live.reduce((s, g) => s + pipeline(g), 0), totalP = live.filter(g => g.decision === "Proposed").reduce((s, g) => s + pipeline(g), 0);
   const tip = t => ` data-tip="${esc(t)}"`;
   const breakdown = (title, field) => {
-    const m = {}; live.forEach(g => { const k = g[field] || "(none)"; (m[k] = m[k] || { v: 0, n: 0 }); m[k].v += pipeline(g); m[k].n++; });
+    const m = {}; live.forEach(g => { const k = g[field] || "(none)"; (m[k] = m[k] || { v: 0, n: 0, p: 0 }); m[k].v += pipeline(g); m[k].n++; if (g.decision === "Proposed") m[k].p += pipeline(g); });
     const keys = Object.keys(m).filter(k => m[k].v > 0).sort((a, b) => m[b].v - m[a].v), max = Math.max(1, ...keys.map(k => m[k].v));
-    return `<div class="card"><h2>${title}</h2><div class="hb">` + keys.map(k => `<div class="hbrow"${tip(`${k}: ${money(m[k].v)}, ${pct(total ? m[k].v / total : 0)} of giving, ${m[k].n} gifts`)}>
-      <span class="hbl">${esc(k)}</span><span class="hbt"><i style="width:${(100 * m[k].v / max).toFixed(1)}%"></i></span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + (field === "cat" ? overheadRow(max) : "") + `</div></div>`;
+    return `<div class="card"><h2>${title}</h2><div class="hb">` + keys.map(k => `<div class="hbrow"${tip(`${k}: ${money(m[k].v)}, ${pct(total ? m[k].v / total : 0)} of giving, ${m[k].n} gifts` + (m[k].p ? ` (${m[k].v - m[k].p ? money(m[k].v - m[k].p) : "$0"} approved, ${money(m[k].p)} proposed)` : ""))}>
+      <span class="hbl">${esc(k)}</span><span class="hbt">${m[k].v - m[k].p > 0 ? `<i style="width:${(100 * (m[k].v - m[k].p) / max).toFixed(1)}%"></i>` : ""}${m[k].p > 0 ? `<i class="p" style="width:${(100 * m[k].p / max).toFixed(1)}%"></i>` : ""}</span><span class="hbv">${money(m[k].v)}</span><span class="hbp">${pct(total ? m[k].v / total : 0)}</span></div>`).join("") + (field === "cat" ? overheadRow(max) : "") + `</div></div>`;
   };
   // overhead is not giving, so it sits below the categories in grey, measured against giving
-  const ohRows = YG.filter(g => g.loc === "Overhead" && (g.decision === "Approved" || g.decision === "Proposed")), oh = ohRows.reduce((s, g) => s + pipeline(g), 0);
+  const ohRows = YG.filter(g => g.loc === "Overhead" && (g.decision === "Approved" || (incP && g.decision === "Proposed"))), oh = ohRows.reduce((s, g) => s + pipeline(g), 0);
   const overheadRow = max => (oh > 0 ? `<div class="hbrow oh"${tip(`Overhead: ${money(oh)} in ${ohRows.length} payments, equal to ${pct(total ? oh / total : 0)} of giving. Not counted in the giving total.`)}>
       <span class="hbl">Overhead (not giving)</span><span class="hbt"><i style="width:${Math.min(100, 100 * oh / max).toFixed(1)}%"></i></span><span class="hbv">${money(oh)}</span><span class="hbp">${pct(total ? oh / total : 0)}</span></div>` : "");
   const years = [...new Set(G.map(g => g.year))].sort();
-  const counts = g => g.loc !== "Overhead" && (g.decision === "Approved" || (g.year >= new Date().getFullYear() && g.decision === "Proposed"));
+  const counts = g => g.loc !== "Overhead" && (g.decision === "Approved" || (incP && g.year >= new Date().getFullYear() && g.decision === "Proposed"));
   // stacked columns by year; colour follows the entity (its position in keys), never its rank
   const stacked = (keys, field, label) => {
-    const val = (y, k) => G.filter(g => g.year === y && counts(g) && (k === "Other" && !keys.includes(g[field]) || g[field] === k)).reduce((s, g) => s + pipeline(g), 0);
+    const part = (y, k, prop) => G.filter(g => g.year === y && counts(g) && (g.decision === "Proposed") === prop && (k === "Other" && !keys.includes(g[field]) || g[field] === k)).reduce((s, g) => s + pipeline(g), 0);
+    const val = (y, k) => part(y, k, false) + part(y, k, true);
     const tot = years.map(y => keys.reduce((s, k) => s + val(y, k), 0)), top = Math.max(1, ...tot), step = top > 400000 ? 100000 : top > 150000 ? 50000 : 25000, ymax = Math.ceil(top / step) * step;
     const W = 760, H = 300, L = 56, B = 26, T = 18, pw = W - L - 10, ph = H - B - T, bw = Math.min(64, pw / years.length * 0.6);
     const col = (k, j) => (k === "Other" ? "#98a2b3" : SERIES[j % SERIES.length]);
@@ -336,11 +338,11 @@ function viewCharts() {
     for (let v = 0; v <= ymax; v += step) { const y = T + ph - ph * v / ymax; svg += `<line x1="${L}" x2="${W - 10}" y1="${y}" y2="${y}" stroke="#e6e9ef"/><text x="${L - 6}" y="${y + 4}" text-anchor="end" class="ax">${v ? "$" + v / 1000 + "K" : "0"}</text>`; }
     years.forEach((y, i) => {
       const cx = L + pw * (i + 0.5) / years.length; let base = 0;
-      keys.forEach((k, j) => { const v = val(y, k); if (!v) return; const h = ph * v / ymax, y0 = T + ph - ph * base / ymax - h;
-        svg += `<rect x="${cx - bw / 2}" y="${y0 + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${col(k, j)}"${tip(`${y} ${k}: ${money(v)}, ${pct(v / tot[i])} of the year`)}/>`; base += v; });
+      keys.forEach((k, j) => [false, true].forEach(prop => { const v = part(y, k, prop); if (!v) return; const h = ph * v / ymax, y0 = T + ph - ph * base / ymax - h;
+        svg += `<rect x="${cx - bw / 2}" y="${y0 + 1}" width="${bw}" height="${Math.max(0, h - 2)}" rx="2" fill="${col(k, j)}"${prop ? ` fill-opacity="0.4"` : ""}${tip(`${y} ${k}: ${money(v)} ${prop ? "proposed" : "approved"}, ${pct(v / tot[i])} of the year`)}/>`; base += v; }));
       svg += `<text x="${cx}" y="${T + ph - ph * tot[i] / ymax - 5}" text-anchor="middle" class="ax b">${money(tot[i])}</text><text x="${cx}" y="${H - 8}" text-anchor="middle" class="ax">${y}${y >= new Date().getFullYear() ? " plan" : ""}</text>`;
     });
-    return `<div class="legend">${keys.map((k, j) => `<span><i style="background:${col(k, j)}"></i>${esc(k)}</span>`).join("")}</div>${svg}</svg>`;
+    return `<div class="legend">${keys.map((k, j) => `<span><i style="background:${col(k, j)}"></i>${esc(k)}</span>`).join("")}${incP ? `<span class="lg-note"><i style="background:#667085;opacity:.4"></i>lighter shade = proposed, not yet approved</span>` : ""}</div>${svg}</svg>`;
   };
   const locs = (S.lists["Location"] || []).filter(l => l !== "Overhead");
   const catTot = {}; G.filter(g => g.loc !== "Overhead" && g.decision === "Approved").forEach(g => (catTot[g.cat] = (catTot[g.cat] || 0) + g.amount));
@@ -385,11 +387,11 @@ function viewCharts() {
   YG.filter(g => g.decision === "Approved" && g.loc !== "Overhead" && /^\d{4}-\d{2}/.test(g.date)).forEach(g => { const m = +g.date.slice(5, 7) - 1; sentM[m] += g.amount; cntM[m]++; });
   const mmax = Math.max(1, ...sentM);
   const months = `<div class="cols">${sentM.map((v, i) => `<div class="col"${tip(`${MN[i]} ${S.year}: ${money(v)} in ${cntM[i]} gifts`)}><b>${v ? "$" + Math.round(v / 1000) + "K" : ""}</b><i style="height:${(100 * v / mmax).toFixed(1)}%"></i><span>${MN[i]}</span></div>`).join("")}</div>`;
-  return filterBar() + `<div class="bar"><span>${S.year}: <b>${money(total)}</b> approved or proposed across ${live.length} gifts, excluding overhead${filtered ? ", for the filters chosen. The overall target line is hidden while a filter is on" : ""}.</span></div>
+  return filterBar(`<label><input type="checkbox" id="chartprop"${incP ? " checked" : ""}> Include proposed gifts</label>`) + `<div class="bar"><span>${S.year}: <b>${money(total)}</b> ${incP ? "approved or proposed" : "approved"} across ${live.length} gifts, excluding overhead${incP && totalP ? ` (${money(total - totalP)} approved, ${money(totalP)} proposed)` : ""}${filtered ? ", for the filters chosen. The overall target line is hidden while a filter is on" : ""}.</span>${incP ? `<span class="lg-note"><i class="sw"></i>solid = approved <i class="sw p"></i>lighter = proposed</span>` : ""}</div>
     <div class="grid2">${breakdown("By category", "cat")}${breakdown("By location", "loc")}${breakdown("By vehicle", "vehicle")}${breakdown("By who directs", "who")}</div>
-    <div class="card"><h2>Changes against ${S.year - 1} <small>by organization, approved + proposed</small></h2>${changes}</div>
+    <div class="card"><h2>Changes against ${S.year - 1} <small>by organization${incP ? ", approved + proposed" : ", approved only"}</small></h2>${changes}</div>
     <div class="card"><h2>Progress through ${S.year} <small>cumulative dollars sent, by date sent</small></h2>${progress}</div>
-    <div class="card"><h2>Giving by year and location <small>approved gifts; years marked "plan" also count proposals</small></h2>${stacked(locs, "loc", "Giving by year and location")}</div>
+    <div class="card"><h2>Giving by year and location <small>${incP ? `approved gifts; years marked "plan" also count proposals` : "approved gifts only"}</small></h2>${stacked(locs, "loc", "Giving by year and location")}</div>
     <div class="card"><h2>Giving by year and category <small>the seven largest categories, with the rest as Other</small></h2>${stacked(cats, "cat", "Giving by year and category")}</div>
     <div class="card"><h2>When gifts were sent in ${S.year} <small>by date sent</small></h2>${months}</div>
     <div class="card"><h2>Largest recipients, ${years[0]} to ${years[years.length - 1]} <small>approved gifts, share of all giving</small></h2>${largest}</div>`;
@@ -477,6 +479,7 @@ document.addEventListener("change", e => {
   if (t.id === "year") { S.year = +t.value; readTargets(); return render(); }
   if (t.id === "showall") { S.showAll = t.checked; return render(); }
   if (t.id === "histprop") { S.histProposed = t.checked; return render(); }
+  if (t.id === "chartprop") { S.chartProposed = t.checked; return render(); }
   if (t.dataset.f) { S.filters[t.dataset.f] = t.value; return render(); }
   if (t.id === "orgnote") return act(() => saveOrgNote(t.dataset.orgname, t.value.trim()));
   const g = t.dataset.a && giftOf(t); if (!g) return;

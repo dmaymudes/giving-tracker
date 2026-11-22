@@ -45,7 +45,7 @@ a.orglink{color:inherit;text-decoration:none;border-bottom:1px dotted var(--mute
 .hb{padding:10px 12px}
 .hbrow{display:grid;grid-template-columns:minmax(110px,170px) 1fr 72px 52px;gap:8px;align-items:center;padding:3px 0}
 .hbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.hbt{height:14px}.hbt i{display:block;height:100%;min-width:2px;background:#2a78d6;border-radius:0 4px 4px 0}
+.hbt{height:14px;display:flex;gap:2px}.hbt i{display:block;height:100%;min-width:2px;background:#2a78d6}.hbt i:last-child{border-radius:0 4px 4px 0}.hbt i.p{opacity:.4}
 .hbv,.hbp{text-align:right;font-variant-numeric:tabular-nums}.hbp{color:var(--mute)}
 .hbrow:hover .hbt i,.col:hover i{background:#1c5cab}
 svg{display:block;width:100%;height:auto;max-height:340px}
@@ -74,3 +74,4 @@ th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--ink)}t
 input.note{width:100%;min-width:200px;max-width:360px}.onote{font-size:12px;color:var(--mute);margin-top:2px}
 .hbrow.oh{margin-top:6px;padding-top:8px;border-top:1px dashed var(--line);color:var(--mute)}.hbrow.oh .hbt i,.hbrow.oh:hover .hbt i{background:#98a2b3}
 .prop{color:#b54708}td.prop{font-style:italic}
+.lg-note{color:var(--mute);font-size:12px}.lg-note i.sw{display:inline-block;width:18px;height:10px;background:#2a78d6;border-radius:2px;margin:0 5px 0 10px;vertical-align:-1px}.lg-note i.sw.p{opacity:.4}
