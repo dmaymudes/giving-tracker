@@ -291,13 +291,21 @@ function viewBudget() {
   return note + vb + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
-  const years = [...new Set(S.gifts.map(g => g.year))].sort(), f = S.filters, by = {};
-  S.gifts.filter(g => g.decision === "Approved" && (!f.loc || g.loc === f.loc) && (!f.who || g.who === f.who) && (!f.veh || g.vehicle === f.veh) && (!f.q || g.org.toLowerCase().includes(f.q.toLowerCase())))
-    .forEach(g => { const o = (by[g.org] = by[g.org] || { loc: g.loc, tot: 0 }); o[g.year] = (o[g.year] || 0) + g.amount; o.tot += g.amount; });
+  const years = [...new Set(S.gifts.map(g => g.year))].sort(), by = {}, inc = S.histProposed;
+  // p holds the proposed part of each year's figure, so cells that include proposals can be coloured
+  S.gifts.filter(g => (g.decision === "Approved" || (inc && g.decision === "Proposed")) && passes(g)).forEach(g => {
+    const v = pipeline(g); if (!v) return;
+    const o = (by[g.org] = by[g.org] || { loc: g.loc, tot: 0, p: {}, ptot: 0 });
+    o[g.year] = (o[g.year] || 0) + v; o.tot += v;
+    if (g.decision === "Proposed") { o.p[g.year] = (o.p[g.year] || 0) + v; o.ptot += v; }
+  });
   const names = Object.keys(by).sort((a, b) => by[a].loc.localeCompare(by[b].loc) || by[b].tot - by[a].tot);
-  let h = filterBar() + `<div class="card"><h2>Gifts by organization and year <small>${names.length} organizations</small></h2><table><tr><th>Organization</th><th>Location</th>${years.map(y => `<th class="n">${y}</th>`).join("")}<th class="n">Total</th></tr>`;
-  names.forEach(n => (h += `<tr><td class="org">${orgLink(n)}</td><td>${esc(by[n].loc)}</td>${years.map(y => `<td class="n">${money(by[n][y])}</td>`).join("")}<td class="n"><b>${money(by[n].tot)}</b></td></tr>`));
-  h += `<tr class="tot"><td>Total</td><td></td>${years.map(y => `<td class="n">${money(names.reduce((s, n) => s + (by[n][y] || 0), 0))}</td>`).join("")}<td class="n">${money(names.reduce((s, n) => s + by[n].tot, 0))}</td></tr></table></div>`;
+  const cell = (v, p, bold) => `<td class="n${p ? " prop" : ""}"${p ? ` data-tip="${esc(p >= v ? "Proposed, not yet approved" : money(v - p) + " approved + " + money(p) + " proposed")}"` : ""}>${bold ? "<b>" : ""}${money(v)}${bold ? "</b>" : ""}</td>`;
+  const sum = (y, k) => names.reduce((t, n) => t + ((k ? by[n].p[y] : by[n][y]) || 0), 0);
+  let h = filterBar(`<label><input type="checkbox" id="histprop"${inc ? " checked" : ""}> Include proposed gifts</label>`) +
+    `<div class="card"><h2>Gifts by organization and year <small>${names.length} organizations${inc ? ` · <span class="prop">amounts in this colour include proposals not yet approved</span>` : " · approved gifts only"}</small></h2><table><tr><th>Organization</th><th>Location</th>${years.map(y => `<th class="n">${y}</th>`).join("")}<th class="n">Total</th></tr>`;
+  names.forEach(n => (h += `<tr><td class="org">${orgLink(n)}</td><td>${esc(by[n].loc)}</td>${years.map(y => cell(by[n][y], by[n].p[y])).join("")}${cell(by[n].tot, by[n].ptot, true)}</tr>`));
+  h += `<tr class="tot"><td>Total</td><td></td>${years.map(y => cell(sum(y), sum(y, 1))).join("")}${cell(names.reduce((t, n) => t + by[n].tot, 0), names.reduce((t, n) => t + by[n].ptot, 0))}</tr></table></div>`;
   return h;
 }
 function viewCharts() {
@@ -468,6 +476,7 @@ document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "year") { S.year = +t.value; readTargets(); return render(); }
   if (t.id === "showall") { S.showAll = t.checked; return render(); }
+  if (t.id === "histprop") { S.histProposed = t.checked; return render(); }
   if (t.dataset.f) { S.filters[t.dataset.f] = t.value; return render(); }
   if (t.id === "orgnote") return act(() => saveOrgNote(t.dataset.orgname, t.value.trim()));
   const g = t.dataset.a && giftOf(t); if (!g) return;

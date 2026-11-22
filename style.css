@@ -73,3 +73,4 @@ th.sortable{cursor:pointer;user-select:none}th.sortable:hover{color:var(--ink)}t
 .callout{padding:10px 12px;border-radius:8px;margin:0 0 12px;border:1px solid}.callout.warn{background:#fff4e5;border-color:#f0c98a}.callout.bad{background:#fdecea;border-color:#f1aeb5}.callout.good{background:#e3f4ea;border-color:#a6d8bb}
 input.note{width:100%;min-width:200px;max-width:360px}.onote{font-size:12px;color:var(--mute);margin-top:2px}
 .hbrow.oh{margin-top:6px;padding-top:8px;border-top:1px dashed var(--line);color:var(--mute)}.hbrow.oh .hbt i,.hbrow.oh:hover .hbt i{background:#98a2b3}
+.prop{color:#b54708}td.prop{font-style:italic}
