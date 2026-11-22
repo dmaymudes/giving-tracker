@@ -188,6 +188,14 @@ const vehOpts = cur => (S.lists["Vehicle"] || []).map(v => `<option${v === cur ?
 const orgLink = n => `<a class="orglink" data-org="${esc(n)}">${esc(n)}</a>`;
 const orgNote = n => ((S.orgs[n] || {})["Notes"] ? `<div class="onote" title="Note about the organization; edit it on the organization's page">${esc(S.orgs[n]["Notes"])}</div>` : "");
 
+// Status of a vehicle's yearly budget (set on the Config tab), counting all of that vehicle's gifts for the year whatever other filters are on
+function budgetCallout(k) {
+  const b = (S.vbudget || {})[k]; if (b == null) return "";
+  const rows = yearGifts().filter(g => g.vehicle === k && g.loc !== "Overhead");
+  const appr = rows.filter(g => g.decision === "Approved").reduce((s, g) => s + g.amount, 0), prop = rows.filter(g => g.decision === "Proposed").reduce((s, g) => s + g.proposed, 0), left = b - appr - prop;
+  return `<div class="callout ${left < -0.5 ? "bad" : left > 0.5 ? "warn" : "good"}"><b>${esc(k)}:</b> ${money(b)} available for ${S.year}. ${appr ? money(appr) : "$0"} approved and ${prop ? money(prop) : "$0"} still proposed, ${appr + prop ? money(appr + prop) : "$0"} in all. ` +
+    (left < -0.5 ? `<b>${money(-left)} over the budget.</b>` : left > 0.5 ? `<b>${money(left)} is not yet allocated.</b>` : `Fully allocated.`) + `</div>`;
+}
 /* ---------- views ---------- */
 function viewDecide() {
   const all = yearGifts().filter(passes).filter(g => g.loc !== "Overhead");
@@ -196,6 +204,7 @@ function viewDecide() {
   const sum = a => a.reduce((s, g) => s + pipeline(g), 0);
   let h = filterBar(`<label><input type="checkbox" id="showall"${S.showAll ? " checked" : ""}> Show decided too</label>
     <button id="approveall" class="ok"${open.length ? "" : " disabled"}>Approve all ${open.length} shown at proposed amount</button>`);
+  if (S.filters.veh) h += budgetCallout(S.filters.veh);
   h += `<div class="card"><h2>Decisions to make <small>${open.length} undecided, ${money(sum(open))} · approved so far ${money(sum(all.filter(g => g.decision === "Approved")))}</small></h2>`;
   if (!rows.length) h += `<div class="empty">Nothing to decide with these filters.</div>`;
   else {
@@ -284,10 +293,7 @@ function viewBudget() {
   const smallSea = cur.filter(o => o.loc === "Seattle" && o.v <= 2500).length;
   const oh = gs.filter(g => g.loc === "Overhead" && g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
   const note = `<div class="bar"><span>Seattle organizations receiving $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
-  // call out any vehicle budget that is not fully used, or is exceeded
-  const vb = Object.keys(S.vbudget || {}).map(k => { const a = agg(giving.filter(g => g.vehicle === k)), tot = a.prop + a.appr, left = S.vbudget[k] - tot;
-    return `<div class="callout ${left < -0.5 ? "bad" : left > 0.5 ? "warn" : "good"}"><b>${esc(k)}:</b> ${money(S.vbudget[k])} available for ${S.year}, ${money(tot)} approved or proposed. ` +
-      (left < -0.5 ? `<b>${money(-left)} over the budget.</b>` : left > 0.5 ? `<b>${money(left)} is not yet allocated.</b>` : `Fully allocated.`) + `</div>`; }).join("");
+  const vb = Object.keys(S.vbudget || {}).map(budgetCallout).join("");
   return note + vb + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
