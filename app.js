@@ -185,6 +185,9 @@ function filterBar(extra) {
     <input data-f="q" placeholder="Search organization" value="${esc(f.q)}"><span class="sp"></span>${extra || ""}</div>`;
 }
 const vehOpts = cur => (S.lists["Vehicle"] || []).map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
+// payment methods allowed for a vehicle (config.js); one choice means it is pre-selected
+const methodsFor = (v, payment) => ((CFG.methods || {})[v] || S.lists["Method"] || []).concat(payment ? ((CFG.paymentExtras || {})[v] || []) : []);
+const methodOpts = (v, cur, payment) => { const ms = methodsFor(v, payment); return (ms.length > 1 ? `<option value="">${payment ? "Method" : ""}</option>` : "") + ms.map(m => `<option${m === cur || ms.length === 1 ? " selected" : ""}>${esc(m)}</option>`).join(""); };
 const orgLink = n => `<a class="orglink" data-org="${esc(n)}">${esc(n)}</a>`;
 const orgNote = n => ((S.orgs[n] || {})["Notes"] ? `<div class="onote" title="Note about the organization; edit it on the organization's page">${esc(S.orgs[n]["Notes"])}</div>` : "");
 
@@ -239,8 +242,8 @@ function viewExecute() {
     rows.forEach(g => {
       const o = S.orgs[g.org] || {}, addr = [o["Address line 1"], o["Address line 2"], [o["City"], o["State"], o["ZIP"]].filter(Boolean).join(" ")].filter(Boolean).join(", ");
       h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${g.notes ? `<div class="onote">${esc(g.notes)}</div>` : ""}</td><td class="n">${money(g.amount)}</td><td class="addr">${esc(addr)}${o["EIN"] ? " · EIN " + esc(o["EIN"]) : ""}</td>
-        <td><select data-x="method"><option></option>${(S.lists["Method"] || []).map(m => `<option${m === g.method ? " selected" : ""}>${esc(m)}</option>`).join("")}</select></td>
-        <td><input class="ref" data-x="ref" value="${esc(g.ref)}" placeholder="check no."></td><td><input type="date" data-x="date" value="${esc(g.date || today())}"></td>
+        <td><select data-x="method">${methodOpts(g.vehicle, g.method)}</select></td>
+        <td><input class="ref" data-x="ref" value="${esc(g.ref)}" placeholder="${methodsFor(g.vehicle).includes("Check") ? "check no." : "confirmation"}"></td><td><input type="date" data-x="date" value="${esc(g.date || today())}"></td>
         <td><button data-a="sent" class="ok">Mark sent</button></td></tr>`;
     });
     h += `</table></div>`;
@@ -248,7 +251,7 @@ function viewExecute() {
   h += `<div class="card"><h2>Record a payment already made <small>for ${S.year}; overhead or any gift paid outside the decide-then-send flow</small></h2><div class="bar" style="padding:12px;margin:0">
     <input id="payorg" list="payorglist" placeholder="Payee" size="30"><datalist id="payorglist">${S.orgList.map(o => `<option value="${esc(o)}">`).join("")}</datalist>
     <input id="payamt" class="amt" placeholder="Amount" inputmode="decimal"><select id="payveh">${vehOpts("Foundation")}</select>
-    <select id="paymeth"><option value="">Method</option>${(S.lists["Method"] || []).map(m => `<option>${esc(m)}</option>`).join("")}</select>
+    <select id="paymeth">${methodOpts("Foundation", "", true)}</select>
     <input id="payref" class="ref" placeholder="Reference"><input id="paydate" type="date" value="${today()}"><button id="addpay" class="primary">Record payment</button></div></div>`;
   if (sent.length) {
     h += `<div class="card"><h2>Sent, not yet confirmed <small>${sent.length} gifts, ${money(sent.reduce((s, g) => s + g.amount, 0))}</small></h2><table><tr><th>Organization</th><th class="n">Amount</th><th>Vehicle</th><th>Method</th><th>Reference</th><th>Date sent</th><th></th></tr>`;
@@ -477,6 +480,7 @@ document.addEventListener("click", e => {
   const tr = t.closest("tr"), x = k => { const el = $(`[data-x="${k}"]`, tr); return el ? el.value : ""; };
   const F = { approve: { decision: "Approved", amount: g.proposed, pay: "To send" }, defer: { decision: "Deferred" }, decline: { decision: "Declined" },
     reopen: { decision: "Proposed", amount: null, pay: null, proposed: g.proposed || g.amount }, sent: { pay: "Sent", method: x("method"), ref: x("ref"), date: x("date") }, confirm: { pay: "Confirmed" }, unsend: { pay: "To send" } }[a];
+  if (a === "sent" && !x("method")) return say("Choose how this was paid before marking it sent.", true);
   if (a === "reopen" && isSent(g)) return say("This gift is already marked sent. Change it in the sheet if that is wrong.", true);
   if (F) act(() => saveGifts([{ gift: g, fields: F }]));
 });
@@ -484,6 +488,7 @@ document.addEventListener("change", e => {
   const t = e.target;
   if (t.id === "year") { S.year = +t.value; readTargets(); return render(); }
   if (t.id === "showall") { S.showAll = t.checked; return render(); }
+  if (t.id === "payveh") { $("#paymeth").innerHTML = methodOpts(t.value, "", true); return; }
   if (t.id === "histprop") { S.histProposed = t.checked; return render(); }
   if (t.id === "chartprop") { S.chartProposed = t.checked; return render(); }
   if (t.dataset.f) { S.filters[t.dataset.f] = t.value; return render(); }

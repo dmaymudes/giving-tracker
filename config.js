@@ -6,5 +6,14 @@ window.GT_CONFIG = {
   scope: "https://www.googleapis.com/auth/drive.file",
   apiKey: "AIzaSyDrqG9PQA3A5CQqa_3YcgQaPafLNhiovOI", // browser key, restricted to this site's address
   appId: "71665477426", // Google Cloud project number (the prefix of the client ID)
+  // How each vehicle can pay. A vehicle with one method gets it filled in automatically; vehicles not listed offer every method.
+  methods: {
+    "Foundation": ["Check", "eCheck", "Card"],
+    "DAF": ["Online grant"],
+    "Fidelity": ["Online grant"],
+    "Cape Cod Foundation": ["Online grant"]
+  },
+  // Extra methods offered only when recording a payment already made (for overhead such as the IRS)
+  paymentExtras: { "Foundation": ["EFTPS", "Other"] },
   tiers: [20000, 15000, 10000, 7500, 5000, 2500, 1000, 0]
 };
