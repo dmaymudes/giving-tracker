@@ -126,7 +126,7 @@ async function start() {
 }
 
 /* ---------- writes ---------- */
-const FIELD = { proposed: "Proposed ($)", decision: "Decision", amount: "Amount ($)", vehicle: "Vehicle", pay: "Payment status", method: "Method", ref: "Reference", date: "Date sent", notes: "Notes" };
+const FIELD = { proposed: "Proposed ($)", decision: "Decision", amount: "Amount ($)", vehicle: "Vehicle", pay: "Payment status", method: "Method", ref: "Reference", date: "Date sent", notes: "Notes", pledge: "Pledge" };
 async function saveGifts(changes) { // [{gift, fields:{key:value}}]
   if (!changes.length) return;
   if (!DEMO) {
@@ -538,7 +538,17 @@ document.addEventListener("click", e => {
     if (!(y0 > 2000) || !amts.length) return say("Enter the first year and an amount for each year of the pledge.", true);
     const label = org + " " + y0 + (amts.length > 1 ? "-" + (y0 + amts.length - 1) : "");
     if (!confirm("Record a pledge to " + org + ": " + amts.map((a, i) => (y0 + i) + " " + money(a)).join(", ") + "?")) return;
-    return act(async () => { for (let i = 0; i < amts.length; i++) await addGift(org, amts[i], veh, null, { year: y0 + i, pledge: label, notes: note }); });
+    // a year that already has an open gift to this organization from this vehicle becomes the pledged gift, so nothing is entered twice
+    return act(async () => { const kept = [];
+      for (let i = 0; i < amts.length; i++) {
+        const ex = S.gifts.find(g => g.year === y0 + i && g.org === org && g.vehicle === veh && !g.pledge && (g.decision === "Proposed" || g.decision === "Approved") && !isSent(g));
+        if (!ex) { await addGift(org, amts[i], veh, null, { year: y0 + i, pledge: label, notes: note }); continue; }
+        const fields = { pledge: label }; if (note && !ex.notes) fields.notes = note;
+        if (ex.decision === "Proposed") fields.proposed = amts[i]; else if (ex.amount !== amts[i]) kept.push((y0 + i) + " stays at the approved " + money(ex.amount));
+        await saveGifts([{ gift: ex, fields }]);
+      }
+      if (kept.length) setTimeout(() => say("Pledge recorded on the existing gifts. " + kept.join("; ") + ". Change the amount on Decide if the pledge differs."), 0);
+    });
   }
   if (t.id === "addpay") {
     const org = $("#payorg").value.trim(), amt = num($("#payamt").value), date = $("#paydate").value;
