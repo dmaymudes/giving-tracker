@@ -48,7 +48,7 @@ async function api(path, opts) {
 /* ---------- load ---------- */
 async function fetchTables() {
   if (DEMO) return demoTables();
-  const q = ["Gifts!A1:P", "Organizations!A1:P", "Config!A1:Z"].map(r => "ranges=" + encodeURIComponent(r)).join("&");
+  const q = ["Gifts!A1:Z", "Organizations!A1:Z", "Config!A1:Z"].map(r => "ranges=" + encodeURIComponent(r)).join("&");
   const j = await api("/values:batchGet?" + q + "&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING");
   return j.valueRanges.map(v => v.values || []);
 }
@@ -69,7 +69,7 @@ function ingest(tables) {
     S.gifts.push({ id: String(v("Gift ID")), row: i + 2, year: num(v("Year")), org: v("Organization"),
       loc: org["Location"] || v("Location") || "", cat: org["Category"] || v("Category") || "", who: org["Directed by"] || v("Directed by") || "",
       proposed: num(v("Proposed ($)")), decision: v("Decision"), amount: num(v("Amount ($)")), vehicle: v("Vehicle"),
-      pay: v("Payment status"), method: v("Method"), ref: String(v("Reference")), date: String(v("Date sent")), notes: v("Notes") });
+      pay: v("Payment status"), method: v("Method"), ref: String(v("Reference")), date: String(v("Date sent")), notes: v("Notes"), pledge: String(v("Pledge")) });
   });
   S.nextRow = g.length + 1;
   for (let i = 1; i < g.length; i++) if (!(g[i][S.gcol["Organization"]])) { S.nextRow = i + 1; break; }
@@ -142,29 +142,50 @@ async function saveGifts(changes) { // [{gift, fields:{key:value}}]
   }
   changes.forEach(ch => Object.assign(ch.gift, Object.fromEntries(Object.entries(ch.fields).map(([k, v]) => [k, v === null ? (["proposed", "amount"].includes(k) ? 0 : "") : v]))));
 }
-async function saveOrgNote(name, text) {
+async function saveOrgField(name, header, value) {
   if (!DEMO) {
-    if (S.ocol["Notes"] == null) throw new Error("The Organizations tab has no Notes column.");
-    const names = (await api("/values/" + encodeURIComponent("Organizations!" + colLetter(S.ocol["Organization"]) + "1:" + colLetter(S.ocol["Organization"])) + "?valueRenderOption=UNFORMATTED_VALUE")).values.map(r => String(r[0] || ""));
+    if (S.ocol[header] == null) throw new Error("The Organizations tab has no " + header + " column.");
+    const nc = colLetter(S.ocol["Organization"]);
+    const names = (await api("/values/" + encodeURIComponent("Organizations!" + nc + "1:" + nc) + "?valueRenderOption=UNFORMATTED_VALUE")).values.map(r => String(r[0] || ""));
     const idx = names.indexOf(name);
     if (idx < 1) throw new Error(name + " was not found on the Organizations tab. Reload and try again.");
-    await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: [{ range: "Organizations!" + colLetter(S.ocol["Notes"]) + (idx + 1), values: [[text]] }] }) });
+    await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: [{ range: "Organizations!" + colLetter(S.ocol[header]) + (idx + 1), values: [[value]] }] }) });
   }
-  if (S.orgs[name]) S.orgs[name]["Notes"] = text;
+  if (S.orgs[name]) S.orgs[name][header] = value;
+}
+const saveOrgNote = (name, text) => saveOrgField(name, "Notes", text);
+async function addOrg(o) { // o = {Organization, Location, Category, "Directed by", Notes, Status}
+  if (S.orgs[o["Organization"]]) throw new Error(o["Organization"] + " is already on the Organizations tab.");
+  if (!DEMO) {
+    for (const h of Object.keys(o)) if (S.ocol[h] == null) throw new Error("The Organizations tab has no " + h + " column.");
+    const ic = colLetter(S.ocol["Org ID"]), nc = colLetter(S.ocol["Organization"]);
+    const j = await api("/values:batchGet?ranges=" + encodeURIComponent("Organizations!" + ic + "1:" + ic) + "&ranges=" + encodeURIComponent("Organizations!" + nc + "1:" + nc) + "&valueRenderOption=UNFORMATTED_VALUE");
+    const ids = (j.valueRanges[0].values || []).map(r => String(r[0] || "")), names = (j.valueRanges[1].values || []).map(r => String(r[0] || ""));
+    if (names.some(n => n.toLowerCase() === o["Organization"].toLowerCase())) throw new Error(o["Organization"] + " is already on the Organizations tab. Press Reload.");
+    let row = Math.max(ids.length, names.length) + 1;
+    for (let i = 1; i < names.length; i++) if (!names[i]) { row = i + 1; break; }
+    const next = "O" + String(ids.reduce((m, x) => Math.max(m, parseInt(x.replace(/\D/g, ""), 10) || 0), 0) + 1).padStart(3, "0");
+    const data = [["Org ID", next]].concat(Object.entries(o)).filter(([, v]) => v !== "").map(([h, v]) => ({ range: "Organizations!" + colLetter(S.ocol[h]) + row, values: [[v]] }));
+    await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) });
+  }
+  S.orgs[o["Organization"]] = Object.assign({}, o); S.orgList.push(o["Organization"]); S.orgList.sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
 }
 async function act(fn) { try { say("Saving…"); await fn(); say(""); render(); } catch (e) { say(e.message, true); } }
-async function addGift(org, amount, vehicle, paid) { // paid = {method, ref, date} records a payment already made
+async function addGift(org, amount, vehicle, paid, extra) { // extra = {year, pledge, notes}
+  const year = (extra && extra.year) || S.year, pledge = (extra && extra.pledge) || "", note = (extra && extra.notes) || ""; // paid = {method, ref, date} records a payment already made
   const maxId = S.gifts.reduce((m, g) => Math.max(m, parseInt(g.id.replace(/\D/g, ""), 10) || 0), 0);
   const id = "G" + String(maxId + 1).padStart(4, "0");
-  const g = { id, year: S.year, org, loc: (S.orgs[org] || {})["Location"] || "", cat: (S.orgs[org] || {})["Category"] || "", who: (S.orgs[org] || {})["Directed by"] || "",
-    proposed: paid ? 0 : amount, decision: paid ? "Approved" : "Proposed", amount: paid ? amount : 0, vehicle, pay: paid ? "Confirmed" : "", method: paid ? paid.method : "", ref: paid ? paid.ref : "", date: paid ? paid.date : "", notes: "" };
+  const g = { id, year, org, loc: (S.orgs[org] || {})["Location"] || "", cat: (S.orgs[org] || {})["Category"] || "", who: (S.orgs[org] || {})["Directed by"] || "",
+    proposed: paid ? 0 : amount, decision: paid ? "Approved" : "Proposed", amount: paid ? amount : 0, vehicle, pay: paid ? "Confirmed" : "", method: paid ? paid.method : "", ref: paid ? paid.ref : "", date: paid ? paid.date : "", notes: note, pledge };
   if (!DEMO) {
     const col = (await api("/values/" + encodeURIComponent("Gifts!C1:C") + "?valueRenderOption=UNFORMATTED_VALUE")).values || [];
     let row = col.length + 1;
     for (let i = 1; i < col.length; i++) if (!col[i][0]) { row = i + 1; break; }
     const c = h => colLetter(S.gcol[h]);
-    const cells = paid ? [["Gift ID", id], ["Year", S.year], ["Organization", org], ["Decision", "Approved"], ["Amount ($)", amount], ["Vehicle", vehicle], ["Payment status", "Confirmed"], ["Method", paid.method], ["Reference", paid.ref], ["Date sent", paid.date]]
-      : [["Gift ID", id], ["Year", S.year], ["Organization", org], ["Proposed ($)", amount], ["Decision", "Proposed"], ["Vehicle", vehicle]];
+    const cells = paid ? [["Gift ID", id], ["Year", year], ["Organization", org], ["Decision", "Approved"], ["Amount ($)", amount], ["Vehicle", vehicle], ["Payment status", "Confirmed"], ["Method", paid.method], ["Reference", paid.ref], ["Date sent", paid.date]]
+      : [["Gift ID", id], ["Year", year], ["Organization", org], ["Proposed ($)", amount], ["Decision", "Proposed"], ["Vehicle", vehicle]];
+    if (pledge) { if (S.gcol["Pledge"] == null) throw new Error("The Gifts tab has no Pledge column."); cells.push(["Pledge", pledge]); }
+    if (note) cells.push(["Notes", note]);
     const data = cells
       .map(([h, v]) => ({ range: "Gifts!" + c(h) + row, values: [[v]] }));
     await api("/values:batchUpdate", { method: "POST", body: JSON.stringify({ valueInputOption: "USER_ENTERED", data }) });
@@ -188,6 +209,10 @@ const vehOpts = cur => (S.lists["Vehicle"] || []).map(v => `<option${v === cur ?
 // payment methods allowed for a vehicle (config.js); one choice means it is pre-selected
 const methodsFor = (v, payment) => ((CFG.methods || {})[v] || S.lists["Method"] || []).concat(payment ? ((CFG.paymentExtras || {})[v] || []) : []);
 const methodOpts = (v, cur, payment) => { const ms = methodsFor(v, payment); return (ms.length > 1 ? `<option value="">${payment ? "Method" : ""}</option>` : "") + ms.map(m => `<option${m === cur || ms.length === 1 ? " selected" : ""}>${esc(m)}</option>`).join(""); };
+const pledgeTag = g => (g.pledge ? ` <span class="tag pledge" title="${esc("Pledge: " + g.pledge)}">Pledged</span>` : "");
+const openPledges = () => S.gifts.filter(g => g.pledge && (g.decision === "Proposed" || g.decision === "Approved") && !isSent(g));
+const shownYears = ys => ys.filter(y => y <= Math.max(new Date().getFullYear(), S.year)); // future years appear only once selected
+const optList = (name, cur) => (S.lists[name] || []).map(v => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
 const orgLink = n => `<a class="orglink" data-org="${esc(n)}">${esc(n)}</a>`;
 const orgNote = n => ((S.orgs[n] || {})["Notes"] ? `<div class="onote" title="Note about the organization; edit it on the organization's page">${esc(S.orgs[n]["Notes"])}</div>` : "");
 
@@ -214,7 +239,7 @@ function viewDecide() {
     h += `<table><tr><th>Organization</th><th>Location</th><th>Directed by</th><th class="n">${S.year - 1} total</th><th class="n">Proposed</th><th>Vehicle</th><th>Decision</th><th></th><th>Note on this gift</th></tr>`;
     rows.forEach(g => {
       const done = g.decision !== "Proposed";
-      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${orgNote(g.org)}</td><td>${esc(g.loc)}</td><td>${esc(g.who)}</td><td class="n">${money(lastYearTotal(g.org))}</td>
+      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${pledgeTag(g)}${orgNote(g.org)}</td><td>${esc(g.loc)}</td><td>${esc(g.who)}</td><td class="n">${money(lastYearTotal(g.org))}</td>
         <td class="n">${done ? money(g.decision === "Approved" ? g.amount : g.proposed) : `<input class="amt" data-a="proposed" value="${g.proposed || ""}" inputmode="decimal">`}</td>
         <td>${done ? esc(g.vehicle) : `<select data-a="vehicle">${vehOpts(g.vehicle)}</select>`}</td>
         <td><span class="tag ${esc(g.decision)}">${esc(g.decision)}</span></td>
@@ -227,6 +252,20 @@ function viewDecide() {
     <input id="neworg" list="orglist" placeholder="Organization" size="36"><datalist id="orglist">${S.orgList.map(o => `<option value="${esc(o)}">`).join("")}</datalist>
     <input id="newamt" class="amt" placeholder="Amount" inputmode="decimal"><select id="newveh">${vehOpts("")}</select><button id="addgift" class="primary">Add as proposed</button>
     <small style="color:var(--mute)">New organizations are added on the Organizations tab of the sheet first.</small></div></div>`;
+  // organizations being considered: not tied to a year, not counted anywhere until a gift is proposed
+  const f = S.filters, cons = S.orgList.filter(n => S.orgs[n]["Status"] === "Considering" && (!f.loc || S.orgs[n]["Location"] === f.loc) && (!f.who || S.orgs[n]["Directed by"] === f.who) && (!f.q || n.toLowerCase().includes(f.q.toLowerCase())));
+  h += `<div class="card"><h2>Organizations to evaluate <small>${cons.length} being considered; they stay here until you propose a gift or remove them</small></h2>`;
+  if (cons.length) {
+    h += `<table><tr><th>Organization</th><th>Location</th><th>Category</th><th>Directed by</th><th class="n">Amount</th><th>Vehicle</th><th></th></tr>`;
+    cons.forEach(n => { const o = S.orgs[n];
+      h += `<tr data-cons="${esc(n)}"><td class="org">${orgLink(n)}${orgNote(n)}</td><td>${esc(o["Location"])}</td><td>${esc(o["Category"])}</td><td>${esc(o["Directed by"])}</td>
+        <td class="n"><input class="amt" data-c="amt" placeholder="Amount" inputmode="decimal"></td><td><select data-c="veh">${vehOpts("")}</select></td>
+        <td><button data-o="propose" class="ok">Propose for ${S.year}</button> <button data-o="drop" class="bad">Remove from consideration</button></td></tr>`; });
+    h += `</table>`;
+  } else h += `<div class="empty">No organizations are being considered${f.loc || f.who || f.q ? " with these filters" : ""}.</div>`;
+  h += `<div class="bar" style="padding:12px;margin:0;border-top:1px solid var(--line)"><input id="consname" placeholder="Organization to consider" size="30">
+    <select id="consloc"><option value="">Location</option>${optList("Location")}</select><select id="conscat"><option value="">Category</option>${optList("Category")}</select>
+    <select id="conswho"><option value="">Directed by</option>${optList("Directed by")}</select><input id="consnote" class="note" placeholder="Why it is of interest"><button id="addcons" class="primary">Add to the list</button></div></div>`;
   return h;
 }
 function viewExecute() {
@@ -241,7 +280,7 @@ function viewExecute() {
       <table><tr><th>Organization</th><th class="n">Amount</th><th>Address</th><th>Method</th><th>Reference</th><th>Date sent</th><th></th></tr>`;
     rows.forEach(g => {
       const o = S.orgs[g.org] || {}, addr = [o["Address line 1"], o["Address line 2"], [o["City"], o["State"], o["ZIP"]].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${g.notes ? `<div class="onote">${esc(g.notes)}</div>` : ""}</td><td class="n">${money(g.amount)}</td><td class="addr">${esc(addr)}${o["EIN"] ? " · EIN " + esc(o["EIN"]) : ""}</td>
+      h += `<tr data-id="${esc(g.id)}"><td class="org">${orgLink(g.org)}${pledgeTag(g)}${g.notes ? `<div class="onote">${esc(g.notes)}</div>` : ""}</td><td class="n">${money(g.amount)}</td><td class="addr">${esc(addr)}${o["EIN"] ? " · EIN " + esc(o["EIN"]) : ""}</td>
         <td><select data-x="method">${methodOpts(g.vehicle, g.method)}</select></td>
         <td><input class="ref" data-x="ref" value="${esc(g.ref)}" placeholder="${methodsFor(g.vehicle).includes("Check") ? "check no." : "confirmation"}"></td><td><input type="date" data-x="date" value="${esc(g.date || today())}"></td>
         <td><button data-a="sent" class="ok">Mark sent</button></td></tr>`;
@@ -297,12 +336,23 @@ function viewBudget() {
   const oh = gs.filter(g => g.loc === "Overhead" && g.decision === "Approved").reduce((s, g) => s + g.amount, 0);
   const note = `<div class="bar"><span>Seattle organizations receiving $2,500 or less: <b class="${tSmall != null && smallSea > tSmall ? "over" : "fine"}">${smallSea}</b>${tSmall != null ? " (soft cap " + tSmall + ")" : ""}</span><span>Overhead paid: <b>${money(oh)}</b></span><span style="color:var(--mute)">Targets are soft and are edited on the Config tab of the sheet.</span></div>`;
   const vb = Object.keys(S.vbudget || {}).map(budgetCallout).join("");
-  return note + vb + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
+  const op = openPledges().sort((x, y) => x.org.localeCompare(y.org) || x.year - y.year), pv = g => (g.decision === "Approved" ? g.amount : g.proposed);
+  const opTot = op.reduce((t, g) => t + pv(g), 0), opFdn = op.filter(g => g.vehicle === "Foundation").reduce((t, g) => t + pv(g), 0);
+  let pl = `<div class="card"><h2>Pledges <small>commitments made for this and future years, until they are paid; shown for all years</small></h2>`;
+  if (op.length) {
+    pl += `<table><tr><th>Organization</th><th>Pledge</th><th class="n">Year</th><th class="n">Amount</th><th>Vehicle</th><th>Status</th><th>Note</th></tr>` +
+      op.map(g => `<tr><td class="org">${orgLink(g.org)}</td><td>${esc(g.pledge)}</td><td class="n">${g.year}</td><td class="n">${money(pv(g))}</td><td>${esc(g.vehicle)}</td><td>${g.decision === "Approved" ? "Confirmed for the year, not yet sent" : "To be confirmed in " + g.year}</td><td class="addr">${esc(g.notes)}</td></tr>`).join("") +
+      `<tr class="tot"><td>Outstanding</td><td></td><td></td><td class="n">${money(opTot)}</td><td colspan="3">${money(opFdn)} of this is from the Foundation</td></tr></table>`;
+  } else pl += `<div class="empty">No pledges are outstanding.</div>`;
+  pl += `<div class="bar" style="padding:12px;margin:0;border-top:1px solid var(--line)"><b>Record a pledge</b><input id="plorg" list="plorglist" placeholder="Organization" size="28"><datalist id="plorglist">${S.orgList.map(o => `<option value="${esc(o)}">`).join("")}</datalist>
+    <select id="plveh">${vehOpts("Foundation")}</select><label>First year <input id="plyear" class="amt" style="width:70px" value="${Math.max(S.year, new Date().getFullYear()) + 1}" inputmode="numeric"></label>
+    <input id="plamts" placeholder="Amount for each year, e.g. 7500, 5000, 5000" size="34"><input id="plnote" class="note" placeholder="How and when it was agreed"><button id="addpledge" class="primary">Record pledge</button></div></div>`;
+  return note + vb + pl + table("By location", S.lists["Location"] || [], "loc", true) + `<div class="grid2">` + table("By vehicle", S.lists["Vehicle"] || [], "vehicle", false, S.vbudget) + table("By who directs", S.lists["Directed by"] || [], "who") + `</div>` + pyr;
 }
 function viewHistory() {
-  const years = [...new Set(S.gifts.map(g => g.year))].sort(), by = {}, inc = S.histProposed;
+  const years = shownYears([...new Set(S.gifts.map(g => g.year))].sort()), by = {}, inc = S.histProposed;
   // p holds the proposed part of each year's figure, so cells that include proposals can be coloured
-  S.gifts.filter(g => (g.decision === "Approved" || (inc && g.decision === "Proposed")) && passes(g)).forEach(g => {
+  S.gifts.filter(g => (g.decision === "Approved" || (inc && g.decision === "Proposed")) && passes(g) && years.includes(g.year)).forEach(g => {
     const v = pipeline(g); if (!v) return;
     const o = (by[g.org] = by[g.org] || { loc: g.loc, tot: 0, p: {}, ptot: 0 });
     o[g.year] = (o[g.year] || 0) + v; o.tot += v;
@@ -334,7 +384,7 @@ function viewCharts() {
   const ohRows = YG.filter(g => g.loc === "Overhead" && (g.decision === "Approved" || (incP && g.decision === "Proposed"))), oh = ohRows.reduce((s, g) => s + pipeline(g), 0);
   const overheadRow = max => (oh > 0 ? `<div class="hbrow oh"${tip(`Overhead: ${money(oh)} in ${ohRows.length} payments, equal to ${pct(total ? oh / total : 0)} of giving. Not counted in the giving total.`)}>
       <span class="hbl">Overhead (not giving)</span><span class="hbt"><i style="width:${Math.min(100, 100 * oh / max).toFixed(1)}%"></i></span><span class="hbv">${money(oh)}</span><span class="hbp">${pct(total ? oh / total : 0)}</span></div>` : "");
-  const years = [...new Set(G.map(g => g.year))].sort();
+  const years = shownYears([...new Set(G.map(g => g.year))].sort());
   const counts = g => g.loc !== "Overhead" && (g.decision === "Approved" || (incP && g.year >= new Date().getFullYear() && g.decision === "Proposed"));
   // stacked columns by year; colour follows the entity (its position in keys), never its rank
   const stacked = (keys, field, label) => {
@@ -409,10 +459,10 @@ const SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"
 const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 function viewOrg(name) {
   const o = S.orgs[name] || {}, rows = S.gifts.filter(g => g.org === name).sort((a, b) => b.year - a.year || b.date.localeCompare(a.date));
-  let h = `<div class="bar"><button onclick="history.back()">Back</button></div><div class="card"><h2>${esc(name)} <small>${esc([o["Location"], o["Category"], o["Directed by"] && "directed by " + o["Directed by"], o["Org type"]].filter(Boolean).join(" · "))}</small></h2>
+  let h = `<div class="bar"><button onclick="history.back()">Back</button></div><div class="card"><h2>${esc(name)} <small>${esc([o["Location"], o["Category"], o["Directed by"] && "directed by " + o["Directed by"], o["Org type"], o["Status"] && o["Status"] !== "Active" && o["Status"].toLowerCase()].filter(Boolean).join(" · "))}</small></h2>
     <div class="bar" style="padding:10px 12px;margin:0"><label style="flex:1;display:flex;gap:8px;align-items:center">Note about this organization <input id="orgnote" class="note" style="flex:1;max-width:none" data-orgname="${esc(name)}" value="${esc(o["Notes"] || "")}" placeholder="Anything worth remembering from year to year"></label></div>
     <table><tr><th>Year</th><th>Decision</th><th class="n">Proposed</th><th class="n">Amount</th><th>Vehicle</th><th>Payment</th><th>Method</th><th>Reference</th><th>Date sent</th><th>Notes</th></tr>`;
-  rows.forEach(g => (h += `<tr><td>${g.year}</td><td><span class="tag ${esc(g.decision)}">${esc(g.decision)}</span></td><td class="n">${money(g.proposed)}</td><td class="n">${money(g.amount)}</td><td>${esc(g.vehicle)}</td><td>${esc(g.pay)}</td><td>${esc(g.method)}</td><td>${esc(g.ref)}</td><td>${esc(g.date)}</td><td>${esc(g.notes)}</td></tr>`));
+  rows.forEach(g => (h += `<tr><td>${g.year}${pledgeTag(g)}</td><td><span class="tag ${esc(g.decision)}">${esc(g.decision)}</span></td><td class="n">${money(g.proposed)}</td><td class="n">${money(g.amount)}</td><td>${esc(g.vehicle)}</td><td>${esc(g.pay)}</td><td>${esc(g.method)}</td><td>${esc(g.ref)}</td><td>${esc(g.date)}</td><td>${esc(g.notes)}</td></tr>`));
   return h + `<tr class="tot"><td>Total given</td><td></td><td></td><td class="n">${money(rows.filter(g => g.decision === "Approved").reduce((s, g) => s + g.amount, 0))}</td><td colspan="6"></td></tr></table></div>`;
 }
 
@@ -420,6 +470,8 @@ function viewOrg(name) {
 function render() {
   if (!S.gifts.length && !S.tables) return;
   const hash = location.hash || "#decide", view = hash.split("/")[0];
+  const ys = [...new Set(S.gifts.map(g => g.year))].sort((x, y) => y - x), ysel = $("#year"); // keep the year list current when a pledge adds future years
+  if (ysel && ysel.options.length !== ys.length) ysel.innerHTML = ys.map(y => `<option${y === S.year ? " selected" : ""}>${y}</option>`).join("");
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.getAttribute("href") === view));
   const m = $("#main");
   if (view === "#org") m.innerHTML = viewOrg(decodeURIComponent(hash.slice(5)));
@@ -469,6 +521,25 @@ document.addEventListener("click", e => {
     if (!S.orgs[org]) return say("Pick an organization from the list. Add new ones on the Organizations tab of the sheet first, then press Reload.", true);
     return act(() => addGift(org, amt, veh));
   }
+  if (t.id === "addcons") {
+    const name = $("#consname").value.trim(); if (!name) return say("Enter the organization's name.", true);
+    return act(() => addOrg({ "Organization": name, "Location": $("#consloc").value, "Category": $("#conscat").value, "Directed by": $("#conswho").value, "Notes": $("#consnote").value.trim(), "Status": "Considering" }));
+  }
+  if (t.dataset.o) {
+    const tr = t.closest("tr[data-cons]"), name = tr.dataset.cons;
+    if (t.dataset.o === "propose") { const amt = num($('[data-c="amt"]', tr).value), veh = $('[data-c="veh"]', tr).value;
+      if (!(amt > 0)) return say("Enter an amount to propose.", true);
+      return act(async () => { await addGift(name, amt, veh); await saveOrgField(name, "Status", "Active"); }); }
+    if (t.dataset.o === "drop") { if (!confirm("Remove " + name + " from consideration? It stays in the sheet, marked as not pursuing.")) return; return act(() => saveOrgField(name, "Status", "Not pursuing")); }
+  }
+  if (t.id === "addpledge") {
+    const org = $("#plorg").value.trim(), y0 = parseInt($("#plyear").value, 10), amts = $("#plamts").value.split(/[;,\s]+(?=\$?\d)/).map(num).filter(x => x > 0), veh = $("#plveh").value, note = $("#plnote").value.trim();
+    if (!S.orgs[org]) return say("Pick an organization from the list.", true);
+    if (!(y0 > 2000) || !amts.length) return say("Enter the first year and an amount for each year of the pledge.", true);
+    const label = org + " " + y0 + (amts.length > 1 ? "-" + (y0 + amts.length - 1) : "");
+    if (!confirm("Record a pledge to " + org + ": " + amts.map((a, i) => (y0 + i) + " " + money(a)).join(", ") + "?")) return;
+    return act(async () => { for (let i = 0; i < amts.length; i++) await addGift(org, amts[i], veh, null, { year: y0 + i, pledge: label, notes: note }); });
+  }
   if (t.id === "addpay") {
     const org = $("#payorg").value.trim(), amt = num($("#payamt").value), date = $("#paydate").value;
     if (!S.orgs[org]) return say("Pick a payee from the list. Add new ones on the Organizations tab of the sheet first, then press Reload.", true);
@@ -480,6 +551,7 @@ document.addEventListener("click", e => {
   const tr = t.closest("tr"), x = k => { const el = $(`[data-x="${k}"]`, tr); return el ? el.value : ""; };
   const F = { approve: { decision: "Approved", amount: g.proposed, pay: "To send" }, defer: { decision: "Deferred" }, decline: { decision: "Declined" },
     reopen: { decision: "Proposed", amount: null, pay: null, proposed: g.proposed || g.amount }, sent: { pay: "Sent", method: x("method"), ref: x("ref"), date: x("date") }, confirm: { pay: "Confirmed" }, unsend: { pay: "To send" } }[a];
+  if ((a === "decline" || a === "defer") && g.pledge && !confirm("This gift is part of a pledge (" + g.pledge + "). " + (a === "decline" ? "Decline" : "Defer") + " it anyway?")) return;
   if (a === "sent" && !x("method")) return say("Choose how this was paid before marking it sent.", true);
   if (a === "reopen" && isSent(g)) return say("This gift is already marked sent. Change it in the sheet if that is wrong.", true);
   if (F) act(() => saveGifts([{ gift: g, fields: F }]));
@@ -504,15 +576,17 @@ window.addEventListener("load", () => { if (DEMO || restoreToken()) start(); });
 /* ---------- demo data (?demo) : invented organizations, nothing is saved ---------- */
 function demoTables() {
   if (window.GT_DEMO_TABLES) return window.GT_DEMO_TABLES; // test hook
-  const orgs = [["Org ID", "Organization", "Location", "Category", "Directed by", "Org type", "EIN", "Usual vehicle", "Country", "Address line 1", "Address line 2", "City", "State", "ZIP"],
+  const orgs = [["Org ID", "Organization", "Location", "Category", "Directed by", "Org type", "EIN", "Usual vehicle", "Country", "Address line 1", "Address line 2", "City", "State", "ZIP", "Also appears as", "Notes", "Status"],
     ["O001", "Example Food Bank", "Seattle", "Basic Needs", "D&E", "501c3", "", "Foundation", "USA", "1 Main St", "", "Seattle", "WA", "98101"],
     ["O002", "Sample Land Trust", "Cape Cod", "Conservation/Climate", "All", "501c3", "", "Foundation"], ["O003", "Demo Library Friends", "Cape Cod", "Community Building", "Sue", "501c3", "", "Fidelity"],
-    ["O004", "Placeholder Scholars", "Seattle", "Educational Equity", "Emily", "501c3", "", "DAF"], ["O005", "Test Voting Project", "National", "Democracy", "David", "501c3", "", "DAF"]];
-  const H = ["Gift ID", "Year", "Organization", "Location", "Category", "Directed by", "Org total last year ($)", "Proposed ($)", "Decision", "Amount ($)", "Vehicle", "Payment status", "Method", "Reference", "Date sent", "Notes"];
+    ["O004", "Placeholder Scholars", "Seattle", "Educational Equity", "Emily", "501c3", "", "DAF"], ["O005", "Test Voting Project", "National", "Democracy", "David", "501c3", "", "DAF"],
+    ["O006", "Imaginary Land Trust", "Cape Cod", "Conservation/Climate", "All", "", "", "", "", "", "", "", "", "", "", "Suggested at the summer meeting", "Considering"]];
+  const H = ["Gift ID", "Year", "Organization", "Location", "Category", "Directed by", "Org total last year ($)", "Proposed ($)", "Decision", "Amount ($)", "Vehicle", "Payment status", "Method", "Reference", "Date sent", "Notes", "Pledge"];
   const gifts = [H]; let n = 1; const y = new Date().getFullYear();
-  orgs.slice(1).forEach((o, i) => { const amt = [10000, 15000, 2500, 5000, 1000][i];
+  orgs.slice(1).forEach((o, i) => { const amt = [10000, 15000, 2500, 5000, 1000][i]; if (amt == null) return;
     gifts.push(["G" + String(n++).padStart(4, "0"), y - 1, o[1], "", "", "", "", "", "Approved", amt, o[7], "Confirmed", "Check", "10" + i, (y - 1) + "-12-10", ""]);
     gifts.push(["G" + String(n++).padStart(4, "0"), y, o[1], "", "", "", "", amt, i === 0 ? "Approved" : "Proposed", i === 0 ? amt : "", o[7], i === 0 ? "To send" : "", "", "", "", ""]); });
+  gifts.push(["G" + String(n++).padStart(4, "0"), y + 1, "Example Food Bank", "", "", "", "", 7500, "Proposed", "", "Foundation", "", "", "", "", "Agreed by letter", "Example Food Bank " + (y + 1)]);
   const cfg = [["Location", "Vehicle", "Category", "Directed by", "Org type", "Decision", "Payment status", "Method", "", "Soft target", String(y), "", "", "Vehicle budget", String(y)],
     ["Seattle", "Foundation", "Basic Needs", "David", "501c3", "Proposed", "To send", "Check", "", "Total giving, excluding overhead ($)", 40000, "", "", "Fidelity", 3000],
     ["Cape Cod", "DAF", "Democracy", "Emily", "501c4", "Approved", "Sent", "eCheck", "", "Seattle, maximum share of total", 0.4],

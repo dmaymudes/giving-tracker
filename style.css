@@ -75,3 +75,4 @@ input.note{width:100%;min-width:200px;max-width:360px}.onote{font-size:12px;colo
 .hbrow.oh{margin-top:6px;padding-top:8px;border-top:1px dashed var(--line);color:var(--mute)}.hbrow.oh .hbt i,.hbrow.oh:hover .hbt i{background:#98a2b3}
 .prop{color:#b54708}td.prop{font-style:italic}
 .lg-note{color:var(--mute);font-size:12px}.lg-note i.sw{display:inline-block;width:18px;height:10px;background:#2a78d6;border-radius:2px;margin:0 5px 0 10px;vertical-align:-1px}.lg-note i.sw.p{opacity:.4}
+.tag.pledge{background:#e8eefb;color:#1f3864;font-size:11px;margin-left:4px}
